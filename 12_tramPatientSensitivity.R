@@ -4,26 +4,49 @@ library(dplyr)
 #get patient phospho/prot data
 
 #get patient drug resposne for trametinib
-source("../beatAMLpatientProfiling/beatAMLData.R")
-
+source('../beatAMLproteomics/beatAMLdata.R')
+loadBeatAMLData()
+loadBeatAMLClinicalDrugData()
+tram.dat<-auc.dat%>%subset(Condition=='Trametinib (GSK1120212)')
 #get trametinib treated cell lines
 
-protData<-querySynapseTable('syn22217037')%>%subset(!is.nan(LogRatio))%>%
+genelist=c('CCL2', 'CCR2', 'CCR4', 'MAPK8', 'HIPK2', 'DYRK2')
+library(ggplot2)
+protplot<-pat.data%>%
+  subset(proteinLevels!=0.0)%>%
+  dplyr::select(Gene,`AML sample`,proteinLevels)%>%
+  distinct()%>%
+  left_join(tram.dat)%>%
+  subset(Gene%in%genelist)%>%
+  ggplot(aes(x=proteinLevels,y=AUC,color=Gene))+geom_point()
+
+kinpat<-mapPhosphoToKinase(pat.phos)%>%
+  rename(`AML sample`='Sample')
+
+kinplot<-kinpat%>%
+  subset(meanLFC!=0.0)%>%
+  left_join(tram.dat)%>%
+  subset(Kinase%in%genelist)%>%
+  ggplot(aes(x=meanLFC,y=AUC,color=Kinase))+geom_point()
+  
+kinOrigpat<-mapPhosphoToKinase(orig.pat.phos)%>%
+  rename(`AML sample`='Sample')
+
+kinorigplot<-kinOrigpat%>%
+  subset(meanLFC!=0.0)%>%
+  left_join(tram.dat)%>%
+  subset(Kinase%in%genelist)%>%
+  ggplot(aes(x=meanLFC,y=AUC,color=Kinase))+geom_point()
+
+p<-cowplot::plot_grid(plotlist=list(prot=protplot,kinase=kinplot,corrected=kinorigplot),labels=c('Protein','Uncorrected Phospho','Corrected Phospho'))
+ggsave('patientProtLevels.png',p,width=10)
+###load all the data
+protData<-querySynapseTable('syn22986326')%>%subset(!is.nan(LogRatio))%>%
   mutate(Gene=unlist(Gene))
 
-phosData<-querySynapseTable('syn22217040')%>%subset(!is.nan(LogRatio))%>%
+phosData<-querySynapseTable('syn22986341')%>%subset(!is.nan(LogRatio))%>%
   mutate(Gene=unlist(Gene))%>%
   mutate(site=unlist(site))
-
-#otherData<-''
-otherPhosData<-querySynapseTable('syn22255396')%>%
-  subset(!is.nan(LogFoldChange))%>%
-  subset(cellLine=='HL60')%>%
-  mutate(Gene=unlist(Gene))%>%
-  mutate(site=unlist(site))%>%
-  rowwise()%>%
-  mutate(Condition=paste(treatment,timePoint,sep='_'))
-
 clinvars<-phosData%>%dplyr::select(Sample='sample',CellType,TimePoint,Treatment)%>%distinct()
 
 kindat<-mapPhosphoToKinase(dplyr::rename(phosData,Sample='sample', LogFoldChange='LogRatio'))
@@ -38,10 +61,6 @@ phosMat<-phosData%>%dplyr::select(sample,site,LogRatio)%>%
                      values_fn=list(LogRatio=mean),values_fill=list(LogRatio=0.0))%>%
   tibble::column_to_rownames('site')
 
-otherPhosMat <-otherPhosData%>%ungroup()%>%dplyr::select(Sample,site,LogFoldChange)%>%
-  tidyr::pivot_wider(values_from=LogFoldChange,names_from=Sample,
-                     values_fn=list(LogFoldChange=mean),values_fill=list(LogFoldChange=0.0))%>%
-  tibble::column_to_rownames('site')
 
 
 kinMat<-kindat%>%dplyr::select(Sample,Kinase,meanLFC)%>%distinct()%>%
@@ -49,9 +68,7 @@ kinMat<-kindat%>%dplyr::select(Sample,Kinase,meanLFC)%>%distinct()%>%
                      values_fill=list(meanLFC=0))%>%
   tibble::column_to_rownames('Kinase')
 
-tpm<-apply(otherPhosMat,2,as.numeric)
-rownames(tpm)<-rownames(otherPhosMat)
-otherPhosMat<-tpm
+
 #######
 summary<-protData%>%dplyr::select(sample,CellType,TimePoint,Treatment)%>%distinct()%>%
   mutate(conditionName=stringr::str_c(CellType,TimePoint,Treatment,sep='_'))
@@ -138,3 +155,4 @@ plotGenesInMat(patComps$tramSens_vs_resistant_prot,patProtMat,0.005,patAnnotes,'
 plotGenesInMat(t0Comps$molm13_vs_resistant_phos,patPhosMat,0.01,patAnnotes,'cellLinePhosSigInPatients')
 plotGenesInMat(t0Comps$molm13_vs_resistant_prot,patProtMat,0.0001,patAnnotes,'cellLineProtSigInPatients')
 plotGenesInMat(t0Comps$molm13_vs_resistant_kin,patKinMat,0.05,patAnnotes,'cellLineKinaseSigInPatients')
+
