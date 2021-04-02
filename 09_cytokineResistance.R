@@ -224,15 +224,15 @@ doAllKSEAplots<-function(condList,pdat=phosData){
 #'added per request of Rucha for her manuscript
 #'@param ksea.df
 #'@return data.frame
-kseaZscoreHeatmap<-function(ksea.df.list,fname){
+kseaZscoreHeatmap<-function(ksea.df.list,fname,gval='Kinase.Gene'){
   require(pheatmap)
   require(dplyr)
   res<-do.call(cbind,lapply(ksea.df.list,function(ksea.df)
     ksea.df%>%
-      dplyr::select(Kinase.Gene,z.score,Condition)%>%
+      dplyr::select(c(gval,'z.score','Condition'))%>%
       distinct()%>%
-      tidyr::pivot_wider(names_from='Condition',values_from='z.score')%>%
-      tibble::column_to_rownames('Kinase.Gene')))
+      tidyr::pivot_wider(names_from='Condition',values_from='z.score', values_fn=list(z.score=mean))%>%
+      tibble::column_to_rownames(gval)))
   pheatmap(res,cellheight=10,cellwidth=10,filename=fname)
 }
   
@@ -585,4 +585,5 @@ ggsave('protAbundance.png',p5,width=10)
 tcvals<-compareTramTreatmentCombos()
 othervals<-doLateComparisons()
 res<-kseaZscoreHeatmap(c(tcvals,othervals),'fullHeatmapKSEAzscores.pdf')
+res2<-kseaZscoreHeatmap(c(tcvals,othervals),'fullHeatmapSubstrateKSEAzscores.pdf','Substrate.Gene')
 
