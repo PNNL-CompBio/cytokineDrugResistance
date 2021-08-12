@@ -7,13 +7,13 @@ output: html_document
 
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(echo = FALSE, warning=F, message=F)
 ##process cytokine data
 library(amlresistancenetworks)
 library(dplyr)
 ```
 
-```{r}
+```{r, cache=T}
 # load data
 globalData <- querySynapseTable('syn22986326') %>%
   subset(!is.nan(LogRatio)) %>%
@@ -33,8 +33,11 @@ summary <- phosData %>%
 
 print(summary)
 
-phospho_data_to_matrix <- function(phospho_data) {
-  phosData %>%
+```
+
+```{r}
+phospho_data_to_matrix <- function(phospho_data){
+  phospho_data %>%
     dplyr::select(sample, site, LogRatio) %>%
     tidyr::pivot_wider(values_from = LogRatio, names_from = sample,
                        values_fn = list(LogRatio = mean, na.rm=T),
@@ -42,14 +45,7 @@ phospho_data_to_matrix <- function(phospho_data) {
     tibble::remove_rownames() %>%
     tibble::column_to_rownames('site')
 }
-
-phosMat <- phosData %>%
-  dplyr::select(sample, site, LogRatio) %>%
-  tidyr::pivot_wider(values_from = LogRatio, names_from = sample,
-                     values_fn = list(LogRatio = mean, na.rm=T),
-                     values_fill = list(LogRatio = 0.0)) %>%
-  tibble::remove_rownames() %>%
-  tibble::column_to_rownames('site')
+phosMat <- phospho_data_to_matrix(phosData)
 ```
 
 
@@ -87,6 +83,9 @@ plotAllData <- function(dat.table, expand=0.01, alpha=0.1, ...) {
 # global PCA
 ```
 
+# PCA
+
+## Experiment 2
 
 ```{r}
 #pdf(file.path(output_dir, "Late_MOLM13_w_Parental_global_PCA.pdf"))
@@ -103,6 +102,7 @@ phosData %>% filter(Batch == "Experiment 2",
 
 ```
 
+## Experiment 1, Molm-13
 ```{r}
 #pdf(file.path(output_dir, "Late_MOLM13_w_Parental_phospho_PCA.pdf"))
 globalData %>% filter(Batch == "Experiment 1",
@@ -121,6 +121,7 @@ phosData %>% filter(Batch == "Experiment 1",
 
 ```
 
+## Experiment 1, Molm-13 Tram Resistant
 ```{r}
 #pdf(file.path(output_dir, "Late_MOLM13_w_Parental_phospho_PCA.pdf"))
 globalData %>% filter(Batch == "Experiment 1",
@@ -156,7 +157,7 @@ library(dplyr)
 library(tibble)
 library(purrr)
 
-doAllKSEAplots <- function(condList, pdat, output_dir) {
+doAllKSEAplots <- function(condList, pdat, output_dir, p_cutoff=0.05) {
   gene.to.site<-dplyr::select(pdat,Gene,site,Peptide)%>%distinct()%>%
     dplyr::mutate(residue=stringr::str_replace(site,paste0(Gene,'-'),''))%>%
     dplyr::mutate(residue=stringr::str_replace_all(residue,"([STY])", ";\\1"))%>%
@@ -168,7 +169,7 @@ doAllKSEAplots <- function(condList, pdat, output_dir) {
       rownames_to_column('site') %>%
       left_join(gene.to.site) %>%
       select(Gene, Peptide, residue, value='logFC', p_adj='adj.P.Val') %>%
-      amlresistancenetworks::computeKSEA(., prefix = clName, 0.05) %>%
+      amlresistancenetworks::computeKSEA(., prefix = clName, p_cutoff) %>%
       mutate(Condition = clName) %>%
       as.data.frame()
   })
@@ -190,6 +191,9 @@ compare_samples <- function(phospho_data, treatment_A, treatment_B) {
 }
 ```
 
+# KSEA + heatmaps
+
+## Experiment 2
 ```{r}
 # experiment 2
 x <- phosData %>%
@@ -214,14 +218,37 @@ write.table(KSEA_plots_output, file='lateOnly_KSEA.tsv',
             quote=FALSE, sep='\t', col.names = NA)
 ```
 
+## With lower p-value cutoff
+
+## Experiment 2
+```{r, fig.height=12}
+# experiment 2
+x <- phosData %>%
+  filter(Batch == "Experiment 2")
+
+
+limma_DEA_results <- list(Tram_vs_Parental = compare_samples(x,
+                                                   "Trametinib",       "none"),
+                TramMCP1_vs_Parental = compare_samples(x,
+                                                   "Trametinib+MCP-1", "none"),
+                Tram_vs_TrMCP1 = compare_samples(x,
+                                                   "Trametinib",       "Trametinib+MCP-1"))
+
+
+output_dir <- "./ksea_results"
+if (!dir.exists(output_dir)) dir.create(output_dir)
+
+setwd(output_dir)
+KSEA_plots_output <- doAllKSEAplots(limma_DEA_results, x, output_dir = "./ksea_plots", p_cutoff=1)
+#output results
+write.table(KSEA_plots_output, file='lateOnly_KSEA.tsv',
+            quote=FALSE, sep='\t', col.names = NA)
+```
 
 
 
 
-
-## Phospho data kinase enrichment
-
-```{r processing functions}
+```{r}
 
 
 ##plot kinase activity
@@ -291,10 +318,8 @@ print(sig.kin)
 plotKinDat(x, kindat, sig.kin, file.path(output_dir,'lateOnly'))
 ```
 
-
-
-## KSEA enrichment analysis
-```{r ksea, echo=FALSE}
+## Experiment 1, Molm13
+```{r}
 
 
 # experiment 2
@@ -321,7 +346,7 @@ write.table(KSEA_plots_output, file='Molm13_KSEA.tsv',
             quote=FALSE, sep='\t', col.names = NA)
 ```
 
-## Phospho data kinase enrichment
+
 
 ```{r }
 
@@ -341,9 +366,8 @@ plotKinDat(x, kindat, sig.kin, file.path(output_dir,'lateOnly'))
 ```
 
 
-
-## KSEA enrichment analysis
-```{r ksea, echo=FALSE}
+## Experiment 1, Molm13 Tram Resistant
+```{r}
 
 
 # experiment 2
@@ -366,7 +390,7 @@ if (!dir.exists(output_dir)) dir.create(output_dir)
 setwd(output_dir)
 KSEA_plots_output <- doAllKSEAplots(limma_DEA_results, x, output_dir = "./ksea_plots")
 #output results
-write.table(KSEA_plots_output, file='Molm13_KSEA.tsv',
+write.table(KSEA_plots_output, file='Molm13_TrResistant_KSEA.tsv',
             quote=FALSE, sep='\t', col.names = NA)
 ```
 
