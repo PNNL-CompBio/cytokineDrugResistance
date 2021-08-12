@@ -40,8 +40,7 @@ phospho_data_to_matrix <- function(phospho_data){
   phospho_data %>%
     dplyr::select(sample, site, LogRatio) %>%
     tidyr::pivot_wider(values_from = LogRatio, names_from = sample,
-                       values_fn = list(LogRatio = mean, na.rm=T),
-                       values_fill = list(LogRatio = 0.0)) %>%
+                       values_fn = list(LogRatio = mean, na.rm=T)) %>%
     tibble::remove_rownames() %>%
     tibble::column_to_rownames('site')
 }
