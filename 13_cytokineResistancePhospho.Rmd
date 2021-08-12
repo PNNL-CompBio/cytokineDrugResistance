@@ -51,7 +51,7 @@ phosMat<-phosData%>%dplyr::select(sample,site,LogRatio)%>%
 ## Now we can define the processing functions needed
 
 We can plot the data and the kinase activity
-```{r processing functions}
+```{r processing functions,echo=FALSE}
 ##
 #' @param dat.table
 plotAllData<-function(dat.table){
@@ -163,17 +163,23 @@ doAllKSEAplots<-function(condList,pdat=phosData){
 #' @return network list?
 runNetworksFromDF<-function(data,gene.col='Kinase.Gene',
                               weight.col='aveSubstrateLog2FC',
+                              pvalue.col='P.Value',
                               condition.col='Condition',extra.col=c('Substrate.Gene','Source','log2FC'),
-                              signif=0.05){
-  res = data%>%
-   # dplyr::select(cond=condition.col,value=weight.col,Gene=gene.col,p.value)%>%
-    mutate(signif=p.value<signif)%>%
-      dplyr::select(c(condition.col,weight.col,gene.col,'signif',extra.col))%>%distinct()%>%
-    dplyr::rename(cond=condition.col,value=weight.col,Gene=gene.col)%>%
-    group_by(cond)%>%
-    dplyr::select(c('cond','Gene','value',extra.col,'signif'))%>%
-    group_map(~ amlresistancenetworks::computeProteinNetwork(.x),keep=TRUE)
-  return(res)
+                              signif=0.01,beta=5){
+  conditions=unique(dplyr::select(data,condition.col))
+  for(con in conditions$condition){
+    dat = data%>%
+      dplyr::select(cond=condition.col,value=weight.col,Gene=gene.col,p.value=pvalue.col)%>%
+      subset(p.value<signif)%>%
+      subset(cond==con)
+    vals<-dat$value
+    names(vals)<- stringr::str_replace_all(dat$Gene,"([sty])", "")
+    print(length(vals))
+    #print(con)
+    #print(vals)
+    amlresistancenetworks::computePhosphoNetwork(phos.vals=vals,beta=beta,fname=paste0('phosphoNetworkfor',con,'_beta',beta))
+  }
+   
 }
 ```
 
@@ -185,45 +191,50 @@ We want to identify changes in each condition at 5 min and 60 min compare to zer
 
 #phosMat<-fullPhosMat
 #phosData<-uncorrectedPhosData
-m13Phos<-list(Tram_5min=limmaTwoFactorDEAnalysis(phosMat,                                     
-                         filter(summary,conditionName=='MOLM-13_0_none')$sample,
-                         filter(summary,conditionName=='MOLM-13_5_Trametinib')$sample),
-              Tram_60min=limmaTwoFactorDEAnalysis(phosMat,
-                         filter(summary,conditionName=='MOLM-13_0_none')$sample,
-                         filter(summary,conditionName=='MOLM-13_60_Trametinib')$sample),
-              MCP1_5min=limmaTwoFactorDEAnalysis(phosMat,                                     
-                         filter(summary,conditionName=='MOLM-13_0_none')$sample,
-                         filter(summary,conditionName=='MOLM-13_5_MCP-1')$sample),
-                MCP1_60min=limmaTwoFactorDEAnalysis(phosMat,  
-                        filter(summary,conditionName=='MOLM-13_0_none')$sample,                                              filter(summary,conditionName=='MOLM-13_60_MCP-1')$sample),
+m13Phos<-list(Tram_5min=limmaTwoFactorDEAnalysis(phosMat,    
+                        filter(summary,conditionName=='MOLM-13_5_Trametinib')$sample,
+                         filter(summary,conditionName=='MOLM-13_0_none')$sample),
+            Tram_60min=limmaTwoFactorDEAnalysis(phosMat,
+                        filter(summary,conditionName=='MOLM-13_60_Trametinib')$sample,
+                         filter(summary,conditionName=='MOLM-13_0_none')$sample),
+              MCP1_5min=limmaTwoFactorDEAnalysis(phosMat,
+                         filter(summary,conditionName=='MOLM-13_5_MCP-1')$sample,                                     
+                         filter(summary,conditionName=='MOLM-13_0_none')$sample),
+                MCP1_60min=limmaTwoFactorDEAnalysis(phosMat,                                             
+                        filter(summary,conditionName=='MOLM-13_60_MCP-1')$sample,
+                        filter(summary,conditionName=='MOLM-13_0_none')$sample),
                 MCP1_tram_5min=limmaTwoFactorDEAnalysis(phosMat,
-                        filter(summary,conditionName=='MOLM-13_0_none')$sample,                     
-                        filter(summary,conditionName=='MOLM-13_5_Trametinib+MCP-1')$sample),
-                MCP1_tram_60min=limmaTwoFactorDEAnalysis(phosMat,
-                        filter(summary,conditionName=='MOLM-13_0_none')$sample,                                              filter(summary,conditionName=='MOLM-13_60_Trametinib+MCP-1')$sample))
+                        filter(summary,conditionName=='MOLM-13_5_Trametinib+MCP-1')$sample,
+                        filter(summary,conditionName=='MOLM-13_0_none')$sample),
+                MCP1_tram_60min=limmaTwoFactorDEAnalysis(phosMat,     
+                        filter(summary,conditionName=='MOLM-13_60_Trametinib+MCP-1')$sample,
+                        filter(summary,conditionName=='MOLM-13_0_none')$sample))
  
   p3<-doAllKSEAplots(m13Phos,phosData)
   
-
-  
   combPhos<-list(comb_5min=limmaTwoFactorDEAnalysis(phosMat,
-                          filter(summary,conditionName=='MOLM-13_5_Trametinib+MCP-1')$sample,
-                          filter(summary,conditionName%in%c('MOLM-13_5_Trametinib','MOLM-13_5_MCP-1'))$sample),
+                         filter(summary,conditionName%in%c('MOLM-13_5_Trametinib','MOLM-13_5_MCP-1'))$sample,
+                          filter(summary,conditionName=='MOLM-13_5_Trametinib+MCP-1')$sample),
                  comb_60min=limmaTwoFactorDEAnalysis(phosMat,
-                          filter(summary,conditionName=='MOLM-13_60_Trametinib+MCP-1')$sample,
-                          filter(summary,conditionName%in%c('MOLM-13_60_Trametinib','MOLM-13_60_MCP-1'))$sample))
+                          filter(summary,conditionName%in%c('MOLM-13_60_Trametinib','MOLM-13_60_MCP-1'))$sample,
+                          filter(summary,conditionName=='MOLM-13_60_Trametinib+MCP-1')$sample))
     p4<-doAllKSEAplots(combPhos,phosData)
 
-   # tramMCP=runNetworksFromDF(ph3)
+  combDf<-do.call(rbind,lapply(names(combPhos),function(x) mutate(combPhos[[x]],condition=x)))
+  
+  tramMCP=runNetworksFromDF(combDf,gene.col='featureID',
+                              weight.col='logFC',pvalue.col='P.Value',beta=5,
+                              condition.col='condition',extra.col=c('AveExpr','t','P.Value'))
+    tramMCP=runNetworksFromDF(combDf,gene.col='featureID',
+                              weight.col='logFC',pvalue.col='P.Value',beta=10,
+                              condition.col='condition',extra.col=c('AveExpr','t','P.Value'))
   #lateHeatmap<-kseaZscoreHeatmap(list(p3,p5),'earlyTreatmentKSEAzscoreHeatmap.pdf')
   sig.kin<-p4%>%
     subset(p.value<0.05)%>%
     select(Kinase.Gene,Condition)%>%distinct()
-  print(sig.kin)
+ # print(sig.kin)
   
-  plotKinDat(subset(kindat,
-                                        Sample%in%subset(summary,CellType=='MOLM-13')$sample),
-
+  plotKinDat(subset(kindat,Sample%in%subset(summary,CellType=='MOLM-13')$sample),
              sig.kin,'timeCourse')
 
 ```
@@ -231,18 +242,18 @@ m13Phos<-list(Tram_5min=limmaTwoFactorDEAnalysis(phosMat,
 ## Late time course comparisons
 We want to see how the late resistant cells compared
 
-```{r collect comparisons}
+```{r collect comparisons,echo=FALSE}
 #####now do various comparisons
 
 latePhos<-list(lateTram_vs_lateCombo=limmaTwoFactorDEAnalysis(phosMat,
-                        filter(summary,conditionName=='Late MOLM-13_0_Trametinib')$sample,
-                        filter(summary,conditionName=='Late MOLM-13_0_Trametinib+MCP-1')$sample),
+                        filter(summary,conditionName=='Late MOLM-13_0_Trametinib+MCP-1')$sample,
+                        filter(summary,conditionName=='Late MOLM-13_0_Trametinib')$sample),
                resist_vs_mcp1_5min=limmaTwoFactorDEAnalysis(phosMat,
-                        filter(summary,conditionName=='MOLM-13 Tr Resistant_0_none')$sample,
-                        filter(summary,conditionName=='MOLM-13 Tr Resistant_5_MCP-1')$sample),
+                        filter(summary,conditionName=='MOLM-13 Tr Resistant_5_MCP-1')$sample,
+                        filter(summary,conditionName=='MOLM-13 Tr Resistant_0_none')$sample),
               resist_vs_mcp1_60min=limmaTwoFactorDEAnalysis(phosMat,
-                        filter(summary,conditionName=='MOLM-13 Tr Resistant_0_none')$sample,
-                        filter(summary,conditionName=='MOLM-13 Tr Resistant_60_MCP-1')$sample))
+                        filter(summary,conditionName=='MOLM-13 Tr Resistant_60_MCP-1')$sample,
+                        filter(summary,conditionName=='MOLM-13 Tr Resistant_0_none')$sample))
   
   ph3<-doAllKSEAplots(latePhos)
              
@@ -252,10 +263,16 @@ latePhos<-list(lateTram_vs_lateCombo=limmaTwoFactorDEAnalysis(phosMat,
   latePhresdf<-do.call(rbind,lapply(names(latePhos),function(x) data.frame(latePhos[[x]],Condition=x)))
    # lateNets<-runNetworksFromDF(ph4)
   
+    tramMCP=runNetworksFromDF(latePhresdf,gene.col='featureID',
+                              weight.col='logFC',pvalue.col='adj.P.Val',beta=5,
+                              condition.col='Condition',extra.col=c('AveExpr','t','P.Value'))
+        tramMCP=runNetworksFromDF(latePhresdf,gene.col='featureID',
+                              weight.col='logFC',pvalue.col='adj.P.Val',beta=10,
+                              condition.col='Condition',extra.col=c('AveExpr','t','P.Value'))
   sig.kin<-ph3%>%
     subset(p.value<0.05)%>%
     select(Kinase.Gene,Condition)%>%distinct()
-  print(sig.kin)
+#  print(sig.kin)
   
   plotKinDat(subset(kindat,
                     Sample%in%subset(summary,CellType%in%c('MOLM-13 Tr Resistant','Late MOLM-13'))$sample),
@@ -267,7 +284,7 @@ These represent the late resistance samples
 ## Network analysis
 To do the network analysis we focus on the substrates only, from the un-corrected data.
 
-```{r network}
+```{r network, echo=FALSE}
 uncorrectedPhosData<-querySynapseTable('syn24389738')%>%subset(!is.nan(LogRatio))%>%
   mutate(Gene=unlist(Gene))%>%
   mutate(site=unlist(site))
