@@ -4,7 +4,7 @@ library(dplyr)
 #get patient phospho/prot data
 
 #get patient drug resposne for trametinib
-source('../beatAMLproteomics/beatAMLdata.R')
+source('../beatAMLpilotProteomics/beatAMLdata.R')
 loadBeatAMLData()
 loadBeatAMLClinicalDrugData()
 tram.dat<-auc.dat%>%subset(Condition=='Trametinib (GSK1120212)')

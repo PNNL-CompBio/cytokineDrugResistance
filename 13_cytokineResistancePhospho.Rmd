@@ -41,7 +41,7 @@ print(summary)
 
 phosMat<-phosData%>%dplyr::select(sample,site,LogRatio)%>%
   tidyr::pivot_wider(values_from=LogRatio,names_from=sample,
-                     values_fn=list(LogRatio=mean,na.rm=T),values_fill=list(LogRatio=0.0))%>%
+                     values_fn=list(LogRatio=mean,na.rm=T))%>%#,values_fill=list(LogRatio=0.0))%>%
   tibble::remove_rownames()%>%
   tibble::column_to_rownames('site')
 
@@ -88,7 +88,8 @@ plotKinDat<-function(kindat,sig.kin=NULL,prefix='all'){
     tidyr::pivot_wider(-c(meanNKINscore,numSubstr),
                                               values_from=meanLFC,
                                                 names_from=Sample,
-                                                values_fn=list(meanLFC=mean), values_fill=0.0)%>%
+                                                values_fn=list(meanLFC=mean))%>%
+  #,values_fill=0.0)%>%
     tibble::remove_rownames()%>%
     tibble::column_to_rownames('Kinase')
   
@@ -142,6 +143,7 @@ doAllKSEAplots<-function(condList,pdat=phosData){
     dplyr::mutate(residue=stringr::str_replace_all(residue,"([sty])", ""))
   
   full.df<-purrr::map_df(names(condList),.f=function(clName){ 
+    print(clName)
     condList[[clName]]%>%
       tibble::rownames_to_column('site')%>%
       left_join(gene.to.site)%>%
@@ -198,9 +200,9 @@ m13Phos<-list(Tram_5min=limmaTwoFactorDEAnalysis(phosMat,
                         filter(summary,conditionName=='MOLM-13_60_Trametinib')$sample,
                          filter(summary,conditionName=='MOLM-13_0_none')$sample),
               MCP1_5min=limmaTwoFactorDEAnalysis(phosMat,
-                         filter(summary,conditionName=='MOLM-13_5_MCP-1')$sample,                                     
+                         filter(summary,conditionName=='MOLM-13_5_MCP-1')$sample,               
                          filter(summary,conditionName=='MOLM-13_0_none')$sample),
-                MCP1_60min=limmaTwoFactorDEAnalysis(phosMat,                                             
+                MCP1_60min=limmaTwoFactorDEAnalysis(phosMat,                                    
                         filter(summary,conditionName=='MOLM-13_60_MCP-1')$sample,
                         filter(summary,conditionName=='MOLM-13_0_none')$sample),
                 MCP1_tram_5min=limmaTwoFactorDEAnalysis(phosMat,
@@ -210,7 +212,7 @@ m13Phos<-list(Tram_5min=limmaTwoFactorDEAnalysis(phosMat,
                         filter(summary,conditionName=='MOLM-13_60_Trametinib+MCP-1')$sample,
                         filter(summary,conditionName=='MOLM-13_0_none')$sample))
  
-  p3<-doAllKSEAplots(m13Phos,phosData)
+ p3<-doAllKSEAplots(m13Phos,phosData)
   
   combPhos<-list(comb_5min=limmaTwoFactorDEAnalysis(phosMat,
                          filter(summary,conditionName%in%c('MOLM-13_5_Trametinib','MOLM-13_5_MCP-1'))$sample,
