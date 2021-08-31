@@ -100,7 +100,7 @@ x <- globalData %>% filter(Batch == "Experiment 2",
 x %>% plotAllData(color='Treatment', fill='Treatment',shape='CellType') +
   ggtitle("Global PCA, Late MOLM-13 + Parental")
 
-phosData %>% filter(Batch == "Experiment 2",
+uncorrectedPhosData %>% filter(Batch == "Experiment 2",
                     TimePoint != 120) %>%
   plotAllData(colour='Treatment', fill='Treatment', shape='CellType') +
   ggtitle("Phospho PCA, Late MOLM-13 + Parental")
@@ -138,7 +138,7 @@ globalData %>% filter(Batch == "Experiment 1",
 #dev.off()
 
 #pdf(file.path(output_dir, "Late_MOLM13_w_Parental_phospho_PCA.pdf"))
-phosData %>% filter(Batch == "Experiment 1",
+uncorrectedPhosData %>% filter(Batch == "Experiment 1",
                     CellType == "MOLM-13 Tr Resistant",
                     Treatment != "Trametinib Withdrawn") %>%
   plotAllData(colour='Treatment', fill='Treatment')+

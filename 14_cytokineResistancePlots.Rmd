@@ -19,7 +19,7 @@ globalData <- querySynapseTable('syn22986326') %>%
   subset(!is.nan(LogRatio)) %>%
   mutate(Gene = unlist(Gene))
 
-phosData <- querySynapseTable('syn22986341') %>%
+phosData <- querySynapseTable('syn22986341')%>%#syn24389738') %>%
   subset(!is.nan(LogRatio)) %>%
   mutate(Gene = unlist(Gene)) %>%
   mutate(site = unlist(site))
@@ -62,8 +62,8 @@ plotAllData <- function(dat.table, expand=0.01, alpha=0.1, ...) {
     distinct() %>%
     mutate(LogRatio=as.numeric(LogRatio)) %>%
     tidyr::pivot_wider(names_from='sample', values_from='LogRatio',
-                       values_fn=list(LogRatio=function(x) mean(x,na.rm=T)),
-                       values_fill=list(LogRatio=0)) %>%
+                       values_fn=list(LogRatio=function(x) mean(x,na.rm=T)))%>%#,
+                       #values_fill=list(LogRatio=0)) %>%
     tibble::remove_rownames() %>%
     tibble::column_to_rownames('Gene')
   mat <- mat[complete.cases(mat),]
@@ -238,7 +238,7 @@ output_dir <- "./ksea_results"
 if (!dir.exists(output_dir)) dir.create(output_dir)
 
 setwd(output_dir)
-KSEA_plots_output <- doAllKSEAplots(limma_DEA_results, x, output_dir = "./ksea_plots", p_cutoff=1)
+KSEA_plots_output <- doAllKSEAplots(limma_DEA_results, x, output_dir = "./ksea_plots", p_cutoff=0.05)
 #output results
 write.table(KSEA_plots_output, file='lateOnly_KSEA.tsv',
             quote=FALSE, sep='\t', col.names = NA)
@@ -277,7 +277,7 @@ plotKinDat <- function(phosData, kindat,sig.kin=NULL,prefix='all') {
     tidyr::pivot_wider(-c(meanNKINscore, numSubstr),
                        values_from=meanLFC,
                        names_from=Sample,
-                       values_fn=list(meanLFC=mean), values_fill=0.0) %>%
+                       values_fn=list(meanLFC=mean))%>%#, values_fill=0.0) %>%
     tibble::remove_rownames() %>%
     tibble::column_to_rownames('Kinase')
   
