@@ -1,0 +1,239 @@
+---
+title: "Cytokine Resistance Phosphodata Experiment 2"
+author: "Sara Gosline"
+date: "9/9/2021"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+##process cytokine data
+library(amlresistancenetworks)
+library(dplyr)
+```
+
+## Phospho data kinase enrichment
+
+For this analysis will load in the phosphoproteomic data collected in the Molm13 cell lines. We use the stoichiometry corrected proteomic data to focus explicitly on the changes in kinase activity.  
+
+```{r data load,echo=FALSE,warning=FALSE}
+
+###load all the data
+
+phosData<-querySynapseTable('syn22986341')%>%subset(!is.nan(LogRatio))%>%
+  mutate(Gene=unlist(Gene))%>%
+  mutate(site=unlist(site))
+
+
+clinvars<-phosData%>%
+  dplyr::select(Sample='sample',CellType,TimePoint,Treatment,Batch)%>%
+  distinct()
+
+##what are we doing again?
+earlySummary<-phosData%>%
+    subset(Batch=='Experiment 1')%>%
+  dplyr::select(sample,CellType,TimePoint,Treatment,Batch)%>%
+  distinct()%>%
+  mutate(conditionName=stringr::str_c(CellType,TimePoint,Treatment,sep='_'))
+
+lateSummary<-phosData%>%
+    subset(Batch=='Experiment 2')%>%
+  dplyr::select(sample,CellType,TimePoint,Treatment,Batch)%>%
+  distinct()%>%
+  mutate(conditionName=stringr::str_c(CellType,TimePoint,Treatment,sep='_'))
+
+
+earlyPhosMat<-phosData%>%
+  subset(Batch=='Experiment 1')%>%
+  dplyr::select(sample,site,LogRatio)%>%
+  tidyr::pivot_wider(values_from=LogRatio,names_from=sample,
+                     values_fn=list(LogRatio=mean,na.rm=T))%>%#updated 9/6,values_fill=list(LogRatio=0.0))%>%
+  tibble::remove_rownames()%>%
+  tibble::column_to_rownames('site')
+
+
+
+latePhosMat<-phosData%>%
+  subset(Batch=='Experiment 2')%>%
+  dplyr::select(sample,site,LogRatio)%>%
+  tidyr::pivot_wider(values_from=LogRatio,names_from=sample,
+                     values_fn=list(LogRatio=mean,na.rm=T))%>%#updated 9/6,values_fill=list(LogRatio=0.0))%>%
+  tibble::remove_rownames()%>%
+  tibble::column_to_rownames('site')
+```
+
+## Now we can define the processing functions needed
+
+
+We can plot the data and the kinase activity as needed in heatmap or PCA form.
+```{r processing functions,echo=TRUE,warning=FALSE}
+##
+#' @param dat.table
+plotAllData<-function(dat.table){
+  library(ggfortify)
+  met<-dat.table%>%dplyr::select(sample,CellType,TimePoint,Treatment)%>%
+    distinct()
+    
+  mat<-dat.table%>%dplyr::select(Gene,LogRatio,sample)%>%
+    distinct()%>%
+    mutate(LogRatio=as.numeric(LogRatio))%>%
+    tidyr::pivot_wider(names_from='sample',values_from='LogRatio',values_fn=list(LogRatio=function(x) mean(x,na.rm=T)),values_fill=list(LogRatio=0))%>%
+  tibble::remove_rownames()%>%
+    tibble::column_to_rownames('Gene')
+  
+  autoplot(prcomp(t(mat)),data=met,colour='Treatment',shape='CellType')
+ 
+}
+
+##plot kinase activity
+plotKinDat<-function(kindat,sig.kin=NULL,prefix='all'){
+  library(pheatmap)
+  
+  ##create matrix of kinase scores
+  if(!is.null(sig.kin)){
+    kindat<-subset(kindat,Kinase%in%sig.kin$Kinase.Gene)
+    kinmat<-sig.kin%>%mutate(score='Yes')%>%
+      tidyr::pivot_wider(names_from=Condition,values_from=score,values_fill=list(score='No'))%>%
+      tibble::column_to_rownames('Kinase.Gene')
+  
+  }
+  
+  mat <-kindat%>%
+    ungroup()%>%
+    tidyr::pivot_wider(-c(meanNKINscore,numSubstr),
+                                              values_from=meanLFC,
+                                                names_from=Sample,
+                                                values_fn=list(meanLFC=mean), values_fill=0.0)%>%
+    tibble::remove_rownames()%>%
+    tibble::column_to_rownames('Kinase')
+  
+  if(!is.null(sig.kin))
+    kinAts=kinmat
+  else
+    kinAts<-kindat%>%
+      ungroup()%>%
+      dplyr::select(Kinase,numSubstr)%>%
+      distinct()%>%
+      group_by(Kinase)%>%
+      summarize(substrates=mean(numSubstr))%>%
+      tibble::remove_rownames()%>%
+      tibble::column_to_rownames('Kinase')
+  
+  sampAts<-phosData%>%
+    dplyr::select(sample,TimePoint,Treatment,CellType)%>%
+    distinct()%>%
+    tibble::remove_rownames()%>%
+    tibble::column_to_rownames('sample')
+  
+  sampAts$TimePoint=as.factor(sampAts$TimePoint)
+  
+  #vars=names(sort(apply(mat,1,var,na.rm=T),decreasing=T))
+  pheatmap(mat,cellwidth = 8,cellheight=8,clustering_distance_cols = 'correlation',
+          clustering_distance_rows = 'correlation',
+          annotation_row = kinAts,annotation_col=sampAts) 
+
+  pheatmap(mat,cellwidth = 8,cellheight=8,clustering_distance_cols = 'correlation',
+          clustering_distance_rows = 'correlation',
+          annotation_row = kinAts,annotation_col=sampAts,
+          file=paste0(prefix,'cytokineKinaseHeatmap.pdf'),height=14,width=8) 
+}
+
+####Show kinase activity
+kindat<-mapPhosphoToKinase(dplyr::rename(phosData,Sample='sample', LogFoldChange='LogRatio'))
+
+```
+
+## KSEA enrichment analysis
+
+Next we define functions to carry out various KSEA analyses. 
+```{r ksea, echo=FALSE}
+#' plot all the KSEA 
+#' @param condList
+#' @return data frame
+doAllKSEAplots<-function(condList,pdat=phosData){
+  
+  gene.to.site<-dplyr::select(pdat,Gene,site,Peptide)%>%distinct()%>%
+    dplyr::mutate(residue=stringr::str_replace(site,paste0(Gene,'-'),''))%>%
+    dplyr::mutate(residue=stringr::str_replace_all(residue,"([STY])", ";\\1"))%>%
+    dplyr::mutate(residue=stringr::str_replace(residue,"^;", ""))%>%
+    dplyr::mutate(residue=stringr::str_replace_all(residue,"([sty])", ""))
+  
+  full.df<-purrr::map_df(names(condList),.f=function(clName){ 
+    print(clName)
+    condList[[clName]]%>%
+      tibble::rownames_to_column('site')%>%
+      left_join(gene.to.site)%>%
+      dplyr::select(Gene,Peptide,residue,value='logFC',p_adj='adj.P.Val')%>%
+      amlresistancenetworks::computeKSEA(.,prefix=clName,0.05,linkedSubs=1)%>%
+      mutate(Condition=clName)%>%
+      as.data.frame()
+  })
+  return(full.df)
+  
+}
+
+
+#' build networks from data frame
+#' @param data.res
+#' @param gene.col
+#' @param weight.col
+#' @param condition.col
+#' @return network list?
+runNetworksFromDF<-function(data,gene.col='Kinase.Gene',
+                              weight.col='aveSubstrateLog2FC',
+                              pvalue.col='P.Value',
+                              condition.col='Condition',extra.col=c('Substrate.Gene','Source','log2FC'),
+                              signif=0.01,beta=5){
+  conditions=unique(dplyr::select(data,condition.col))
+  for(con in conditions$condition){
+    dat = data%>%
+      dplyr::select(cond=condition.col,value=weight.col,Gene=gene.col,p.value=pvalue.col)%>%
+      subset(p.value<signif)%>%
+      subset(cond==con)
+    vals<-dat$value
+    names(vals)<- stringr::str_replace_all(dat$Gene,"([sty])", "")
+    print(length(vals))
+    #print(con)
+    #print(vals)
+    amlresistancenetworks::computePhosphoNetwork(phos.vals=vals,beta=beta,fname=paste0('phosphoNetworkfor',con,'_beta',beta))
+  }
+   
+}
+```
+
+### Early time course comparisons
+
+We want to identify changes in each condition at 5 min and 60 min compare to zero.
+
+```{r early time course,warning=FALSE,echo=FALSE}
+
+phosMat <- latePhosMat
+summary <- lateSummary
+#phosMat<-fullPhosMat
+#phosData<-uncorrectedPhosData
+m13Phos<-list(Tram_vs_control=limmaTwoFactorDEAnalysis(phosMat,    
+                        filter(summary,conditionName=='Late MOLM-13_0_Trametinib')$sample,
+                         filter(summary,conditionName=='MOLM-13_0_none')$sample),
+            TramMCP1_vs_control=limmaTwoFactorDEAnalysis(phosMat,
+                        filter(summary,conditionName=='Late MOLM-13_0_Trametinib+MCP-1')$sample,
+                         filter(summary,conditionName=='MOLM-13_0_none')$sample),
+              TramMCP1_vs_Tram=limmaTwoFactorDEAnalysis(phosMat,
+                         filter(summary,conditionName=='Late MOLM-13_0_Trametinib')$sample,             
+                         filter(summary,conditionName=='Late MOLM-13_0_Trametinib+MCP-1')$sample))
+ 
+  p3<-doAllKSEAplots(m13Phos,phosData)
+  
+  sig.kin<-p3%>%
+    subset(p.value<0.05)%>%
+    select(Kinase.Gene,Condition)%>%distinct()
+ # print(sig.kin)
+  
+  plotKinDat(subset(kindat,
+                                        Sample%in%subset(summary,CellType=='MOLM-13')$sample),
+
+             sig.kin,'exp2Results')
+  
+```
+
+And there we have the analysis
