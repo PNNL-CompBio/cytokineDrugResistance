@@ -253,13 +253,13 @@ m13Phos<-list(Tram_5min=limmaTwoFactorDEAnalysis(phosMat,
 
   combDf<-do.call(rbind,lapply(names(combPhos),function(x) mutate(combPhos[[x]],condition=x)))
   
-  tramMCP=runNetworksFromDF(combDf,gene.col='featureID',
-                              weight.col='logFC',pvalue.col='P.Value',beta=5,
-                              condition.col='condition',extra.col=c('AveExpr','t','P.Value'))
-    tramMCP=runNetworksFromDF(combDf,gene.col='featureID',
-                              weight.col='logFC',pvalue.col='P.Value',beta=10,
-                              condition.col='condition',extra.col=c('AveExpr','t','P.Value'))
-  #lateHeatmap<-kseaZscoreHeatmap(list(p3,p5),'earlyTreatmentKSEAzscoreHeatmap.pdf')
+#  tramMCP=runNetworksFromDF(combDf,gene.col='featureID',
+#                              weight.col='logFC',pvalue.col='P.Value',beta=5,
+#                              condition.col='condition',extra.col=c('AveExpr','t','P.Value'))
+#    tramMCP=runNetworksFromDF(combDf,gene.col='featureID',
+#                              weight.col='logFC',pvalue.col='P.Value',beta=10,
+#                              condition.col='condition',extra.col=c('AveExpr','t','P.Value'))
+#  #lateHeatmap<-kseaZscoreHeatmap(list(p3,p5),'earlyTreatmentKSEAzscoreHeatmap.pdf')
   sig.kin<-p4%>%
     subset(p.value<0.05)%>%
     select(Kinase.Gene,Condition)%>%distinct()
@@ -297,12 +297,12 @@ latePhos<-list(#lateTram_vs_lateCombo=limmaTwoFactorDEAnalysis(phosMat,
   latePhresdf<-do.call(rbind,lapply(names(latePhos),function(x) data.frame(latePhos[[x]],Condition=x)))
    # lateNets<-runNetworksFromDF(ph4)
   
-    tramMCP=runNetworksFromDF(latePhresdf,gene.col='featureID',
-                              weight.col='logFC',pvalue.col='adj.P.Val',beta=5,
-                              condition.col='Condition',extra.col=c('AveExpr','t','P.Value'))
-        tramMCP=runNetworksFromDF(latePhresdf,gene.col='featureID',
-                              weight.col='logFC',pvalue.col='adj.P.Val',beta=10,
-                              condition.col='Condition',extra.col=c('AveExpr','t','P.Value'))
+   # tramMCP=runNetworksFromDF(latePhresdf,gene.col='featureID',
+  #                            weight.col='logFC',pvalue.col='adj.P.Val',beta=5,
+  #                            condition.col='Condition',extra.col=c('AveExpr','t','P.Value'))
+  #      tramMCP=runNetworksFromDF(latePhresdf,gene.col='featureID',
+  #                            weight.col='logFC',pvalue.col='adj.P.Val',beta=10,
+  #                            condition.col='Condition',extra.col=c('AveExpr','t','P.Value'))
   sig.kin<-ph3%>%
     subset(p.value<0.05)%>%
     select(Kinase.Gene,Condition)%>%distinct()

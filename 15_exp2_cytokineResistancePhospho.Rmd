@@ -129,14 +129,16 @@ plotKinDat<-function(kindat,sig.kin=NULL,prefix='all'){
   sampAts$TimePoint=as.factor(sampAts$TimePoint)
   
   #vars=names(sort(apply(mat,1,var,na.rm=T),decreasing=T))
-  pheatmap(mat,cellwidth = 8,cellheight=8,clustering_distance_cols = 'correlation',
-          clustering_distance_rows = 'correlation',
-          annotation_row = kinAts,annotation_col=sampAts) 
-
+ 
   pheatmap(mat,cellwidth = 8,cellheight=8,clustering_distance_cols = 'correlation',
           clustering_distance_rows = 'correlation',
           annotation_row = kinAts,annotation_col=sampAts,
           file=paste0(prefix,'cytokineKinaseHeatmap.pdf'),height=14,width=8) 
+  
+  res<- pheatmap(mat,cellwidth = 8,cellheight=8,clustering_distance_cols = 'correlation',
+          clustering_distance_rows = 'correlation',
+          annotation_row = kinAts,annotation_col=sampAts) 
+  return(res)
 }
 
 ####Show kinase activity
@@ -165,7 +167,7 @@ doAllKSEAplots<-function(condList,pdat=phosData){
       tibble::rownames_to_column('site')%>%
       left_join(gene.to.site)%>%
       dplyr::select(Gene,Peptide,residue,value='logFC',p_adj='adj.P.Val')%>%
-      amlresistancenetworks::computeKSEA(.,prefix=clName,0.05,linkedSubs=1)%>%
+      amlresistancenetworks::computeKSEA(.,prefix=clName,0.1,linkedSubs=1)%>%
       mutate(Condition=clName)%>%
       as.data.frame()
   })
@@ -225,14 +227,11 @@ m13Phos<-list(Tram_vs_control=limmaTwoFactorDEAnalysis(phosMat,
   p3<-doAllKSEAplots(m13Phos,phosData)
   
   sig.kin<-p3%>%
-    subset(p.value<0.05)%>%
+    subset(p.value<0.1)%>%
     select(Kinase.Gene,Condition)%>%distinct()
  # print(sig.kin)
   
-  plotKinDat(subset(kindat,
-                                        Sample%in%subset(summary,CellType=='MOLM-13')$sample),
-
-             sig.kin,'exp2Results')
+  plotKinDat(subset(kindat,Sample%in%summary$sample), sig.kin,'exp2Results')
   
 ```
 
