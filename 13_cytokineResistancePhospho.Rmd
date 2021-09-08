@@ -15,10 +15,9 @@ library(dplyr)
 
 ## Phospho data kinase enrichment
 
-For this analysis will load in the phosphoproteomic data collected in the Molm13 cell lines. We use the 
-stoichiometry corrected proteomic data to focus explicitly on the changes in kinase activity. 
+For this analysis will load in the phosphoproteomic data collected in the Molm13 cell lines. We use the stoichiometry corrected proteomic data to focus explicitly on the changes in kinase activity.  
 
-```{r data load,echo=FALSE}
+```{r data load,echo=FALSE,warning=FALSE}
 
 ###load all the data
 
@@ -28,30 +27,47 @@ phosData<-querySynapseTable('syn22986341')%>%subset(!is.nan(LogRatio))%>%
 
 
 clinvars<-phosData%>%
-  dplyr::select(Sample='sample',CellType,TimePoint,Treatment)%>%
+  dplyr::select(Sample='sample',CellType,TimePoint,Treatment,Batch)%>%
   distinct()
 
 ##what are we doing again?
-summary<-phosData%>%
-  dplyr::select(sample,CellType,TimePoint,Treatment)%>%
+earlySummary<-phosData%>%
+    subset(Batch=='Experiment 1')%>%
+  dplyr::select(sample,CellType,TimePoint,Treatment,Batch)%>%
   distinct()%>%
   mutate(conditionName=stringr::str_c(CellType,TimePoint,Treatment,sep='_'))
 
-print(summary)
+lateSummary<-phosData%>%
+    subset(Batch=='Experiment 2')%>%
+  dplyr::select(sample,CellType,TimePoint,Treatment,Batch)%>%
+  distinct()%>%
+  mutate(conditionName=stringr::str_c(CellType,TimePoint,Treatment,sep='_'))
 
-phosMat<-phosData%>%dplyr::select(sample,site,LogRatio)%>%
+
+earlyPhosMat<-phosData%>%
+  subset(Batch=='Experiment 1')%>%
+  dplyr::select(sample,site,LogRatio)%>%
   tidyr::pivot_wider(values_from=LogRatio,names_from=sample,
-                     values_fn=list(LogRatio=mean,na.rm=T),values_fill=list(LogRatio=0.0))%>%
+                     values_fn=list(LogRatio=mean,na.rm=T))%>%#updated 9/6,values_fill=list(LogRatio=0.0))%>%
   tibble::remove_rownames()%>%
   tibble::column_to_rownames('site')
 
 
+
+latePhosMat<-phosData%>%
+  subset(Batch=='Experiment 2')%>%
+  dplyr::select(sample,site,LogRatio)%>%
+  tidyr::pivot_wider(values_from=LogRatio,names_from=sample,
+                     values_fn=list(LogRatio=mean,na.rm=T))%>%#updated 9/6,values_fill=list(LogRatio=0.0))%>%
+  tibble::remove_rownames()%>%
+  tibble::column_to_rownames('site')
 ```
 
 ## Now we can define the processing functions needed
 
-We can plot the data and the kinase activity
-```{r processing functions,echo=FALSE}
+
+We can plot the data and the kinase activity as needed in heatmap or PCA form.
+```{r processing functions,echo=TRUE,warning=FALSE}
 ##
 #' @param dat.table
 plotAllData<-function(dat.table){
@@ -129,6 +145,8 @@ kindat<-mapPhosphoToKinase(dplyr::rename(phosData,Sample='sample', LogFoldChange
 ```
 
 ## KSEA enrichment analysis
+
+Next we define functions to carry out various KSEA analyses. 
 ```{r ksea, echo=FALSE}
 #' plot all the KSEA 
 #' @param condList
@@ -142,11 +160,12 @@ doAllKSEAplots<-function(condList,pdat=phosData){
     dplyr::mutate(residue=stringr::str_replace_all(residue,"([sty])", ""))
   
   full.df<-purrr::map_df(names(condList),.f=function(clName){ 
+    print(clName)
     condList[[clName]]%>%
       tibble::rownames_to_column('site')%>%
       left_join(gene.to.site)%>%
       dplyr::select(Gene,Peptide,residue,value='logFC',p_adj='adj.P.Val')%>%
-      amlresistancenetworks::computeKSEA(.,prefix=clName,0.05)%>%
+      amlresistancenetworks::computeKSEA(.,prefix=clName,0.05,linkedSubs=1)%>%
       mutate(Condition=clName)%>%
       as.data.frame()
   })
@@ -183,12 +202,14 @@ runNetworksFromDF<-function(data,gene.col='Kinase.Gene',
 }
 ```
 
-## Early time course comparisons
+### Early time course comparisons
 
 We want to identify changes in each condition at 5 min and 60 min compare to zero.
 
 ```{r early time course,warning=FALSE,echo=FALSE}
 
+phosMat <- earlyPhosMat
+summary <- earlySummary
 #phosMat<-fullPhosMat
 #phosData<-uncorrectedPhosData
 m13Phos<-list(Tram_5min=limmaTwoFactorDEAnalysis(phosMat,    
@@ -211,6 +232,16 @@ m13Phos<-list(Tram_5min=limmaTwoFactorDEAnalysis(phosMat,
                         filter(summary,conditionName=='MOLM-13_0_none')$sample))
  
   p3<-doAllKSEAplots(m13Phos,phosData)
+  
+  sig.kin<-p3%>%
+    subset(p.value<0.05)%>%
+    select(Kinase.Gene,Condition)%>%distinct()
+ # print(sig.kin)
+  
+  plotKinDat(subset(kindat,
+                                        Sample%in%subset(summary,CellType=='MOLM-13')$sample),
+
+             sig.kin,'singleTimeCourse')
   
   combPhos<-list(comb_5min=limmaTwoFactorDEAnalysis(phosMat,
                          filter(summary,conditionName%in%c('MOLM-13_5_Trametinib','MOLM-13_5_MCP-1'))$sample,
@@ -239,15 +270,18 @@ m13Phos<-list(Tram_5min=limmaTwoFactorDEAnalysis(phosMat,
 
 ```
 
-## Late time course comparisons
+### Late time course comparisons
 We want to see how the late resistant cells compared
 
 ```{r collect comparisons,echo=FALSE}
 #####now do various comparisons
 
-latePhos<-list(lateTram_vs_lateCombo=limmaTwoFactorDEAnalysis(phosMat,
-                        filter(summary,conditionName=='Late MOLM-13_0_Trametinib+MCP-1')$sample,
-                        filter(summary,conditionName=='Late MOLM-13_0_Trametinib')$sample),
+
+phosMat <- earlyPhosMat
+summary <-earlySummary
+latePhos<-list(#lateTram_vs_lateCombo=limmaTwoFactorDEAnalysis(phosMat,
+              #          filter(summary,conditionName=='Late MOLM-13_0_Trametinib')$sample,
+              #          filter(summary,conditionName=='Late MOLM-13_0_Trametinib+MCP-1')$sample),
                resist_vs_mcp1_5min=limmaTwoFactorDEAnalysis(phosMat,
                         filter(summary,conditionName=='MOLM-13 Tr Resistant_5_MCP-1')$sample,
                         filter(summary,conditionName=='MOLM-13 Tr Resistant_0_none')$sample),
@@ -272,8 +306,7 @@ latePhos<-list(lateTram_vs_lateCombo=limmaTwoFactorDEAnalysis(phosMat,
   sig.kin<-ph3%>%
     subset(p.value<0.05)%>%
     select(Kinase.Gene,Condition)%>%distinct()
-#  print(sig.kin)
-  
+
   plotKinDat(subset(kindat,
                     Sample%in%subset(summary,CellType%in%c('MOLM-13 Tr Resistant','Late MOLM-13'))$sample),
              sig.kin,'lateResistance')
@@ -281,8 +314,8 @@ latePhos<-list(lateTram_vs_lateCombo=limmaTwoFactorDEAnalysis(phosMat,
 ```
 These represent the late resistance samples
 
-## Network analysis
-To do the network analysis we focus on the substrates only, from the un-corrected data.
+### Network analysis
+To do the network analysis we focus on the substrates only, from the un-corrected data. Skipping this now.
 
 ```{r network, echo=FALSE}
 uncorrectedPhosData<-querySynapseTable('syn24389738')%>%subset(!is.nan(LogRatio))%>%
