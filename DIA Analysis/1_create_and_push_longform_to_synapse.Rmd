@@ -1,0 +1,48 @@
+---
+title: "Converting to long form and pushing to Synapse"
+author: "Camilo Posso"
+date: "09/13/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(dplyr)
+library(tibble)
+library(tidyr)
+```
+
+## Data formats
+
+Using the data available in the crosstabs and a second metadata file, we can create a Synapse table that is in 'long form' and has all the protein/phosphosite values together with their relevant metadata.
+
+### Issues with SSL? Try disconnecting your VPN
+
+```{r synapselogin}
+source("../util/synapseUtil.R")
+
+syn <- synapseLogin()
+
+crossTab <- querySynapseTable("syn26164951")
+rownames(crossTab) <- crossTab$Protein
+
+long <- pivot_longer(crossTab, cols = !Protein, names_to = "Sample", values_to = "Intensity")
+
+metadata <- querySynapseTable("syn26160053") %>%
+  rename(Sample = SampleName) %>%
+  mutate(CellCount = as.character(CellCount))
+rownames(metadata) <- 1:nrow(metadata)
+
+## merge with metadata
+long <- left_join(long, metadata, by = "Sample") %>% 
+  subset(!is.na(Intensity)) %>%
+  arrange(Protein)
+
+```
+
+```{r push to synapse}
+name <- "DIA Data Longform"
+
+synTableStore(long, name, parentId='syn22128879')
+```
+
