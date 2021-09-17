@@ -38,6 +38,7 @@ earlySummary<-phosData%>%
   mutate(conditionName=stringr::str_c(CellType,TimePoint,Treatment,sep='_'))
 
 lateSummary<-phosData%>%
+  subset(TimePoint==0)%>%
     subset(Batch=='Experiment 2')%>%
   dplyr::select(sample,CellType,TimePoint,Treatment,Batch)%>%
   distinct()%>%
@@ -55,6 +56,7 @@ earlyPhosMat<-phosData%>%
 
 
 latePhosMat<-phosData%>%
+  subset(TimePoint==0)%>%
   subset(Batch=='Experiment 2')%>%
   dplyr::select(sample,site,LogRatio)%>%
   tidyr::pivot_wider(values_from=LogRatio,names_from=sample,
@@ -70,7 +72,7 @@ We can plot the data and the kinase activity as needed in heatmap or PCA form.
 ```{r processing functions,echo=TRUE,warning=FALSE}
 ##
 #' @param dat.table
-plotAllData<-function(dat.table){
+plotAllData<-function(dat.table,prefix){
   library(ggfortify)
   met<-dat.table%>%dplyr::select(sample,CellType,TimePoint,Treatment)%>%
     distinct()
@@ -82,8 +84,10 @@ plotAllData<-function(dat.table){
   tibble::remove_rownames()%>%
     tibble::column_to_rownames('Gene')
   
-  autoplot(prcomp(t(mat)),data=met,colour='Treatment',shape='CellType')
- 
+  p<-autoplot(prcomp(t(mat)),data=met,colour='Treatment',shape='CellType')
+  
+  ggsave(file=paste0('pcaPlot',prefix,'.pdf'),p, device='pdf')
+  return(p)
 }
 
 ##plot kinase activity
@@ -142,6 +146,11 @@ plotKinDat<-function(kindat,sig.kin=NULL,prefix='all'){
 ####Show kinase activity
 kindat<-mapPhosphoToKinase(dplyr::rename(phosData,Sample='sample', LogFoldChange='LogRatio'))
 
+
+##plot PCA
+phosData%>%
+  subset(Batch=='Experiment 1')%>%
+  plotAllData('Experiment 1')
 ```
 
 ## KSEA enrichment analysis
@@ -165,7 +174,7 @@ doAllKSEAplots<-function(condList,pdat=phosData){
       tibble::rownames_to_column('site')%>%
       left_join(gene.to.site)%>%
       dplyr::select(Gene,Peptide,residue,value='logFC',p_adj='adj.P.Val')%>%
-      amlresistancenetworks::computeKSEA(.,prefix=clName,0.05,linkedSubs=1)%>%
+      amlresistancenetworks::computeKSEA(.,prefix=clName,0.05,linkedSubs=1,suffix='pdf')%>%
       mutate(Condition=clName)%>%
       as.data.frame()
   })
@@ -202,9 +211,15 @@ runNetworksFromDF<-function(data,gene.col='Kinase.Gene',
 }
 ```
 
-### Early time course comparisons
+### Single agent time course comparisons
 
-We want to identify changes in each condition at 5 min and 60 min compare to zero.
+We want to identify changes in each condition at 5 min and 60 min compare to zero. From here we can see the changes in predicted kinase activity upon treatment. Specifically these comparisons include:
+1. 5 min Trametinib vs. control
+2. 60 min Trametinib vs. control
+3. 5 min MCP-1 vs. control
+4. 60 min MCP-1 vs. control
+5. 5 min MCP-1+Trametinib vs. control
+6. 60 min MCP-1+Trametinib vs. control
 
 ```{r early time course,warning=FALSE,echo=FALSE}
 
@@ -270,8 +285,8 @@ m13Phos<-list(Tram_5min=limmaTwoFactorDEAnalysis(phosMat,
 
 ```
 
-### Late time course comparisons
-We want to see how the late resistant cells compared
+### Resistant cells time course comparisons
+We want to see how the resistant cells compared compare to resistant controls at both 5 minutes and 60 minutes.
 
 ```{r collect comparisons,echo=FALSE}
 #####now do various comparisons
@@ -314,27 +329,27 @@ latePhos<-list(#lateTram_vs_lateCombo=limmaTwoFactorDEAnalysis(phosMat,
 ```
 These represent the late resistance samples
 
-### Network analysis
-To do the network analysis we focus on the substrates only, from the un-corrected data. Skipping this now.
+<!-- ### Network analysis -->
+<!-- To do the network analysis we focus on the substrates only, from the un-corrected data. Skipping this now. -->
 
-```{r network, echo=FALSE}
-uncorrectedPhosData<-querySynapseTable('syn24389738')%>%subset(!is.nan(LogRatio))%>%
-  mutate(Gene=unlist(Gene))%>%
-  mutate(site=unlist(site))
+<!-- ```{r network, echo=FALSE} -->
+<!-- uncorrectedPhosData<-querySynapseTable('syn24389738')%>%subset(!is.nan(LogRatio))%>% -->
+<!--   mutate(Gene=unlist(Gene))%>% -->
+<!--   mutate(site=unlist(site)) -->
 
-fullPhosMat<-uncorrectedPhosData%>%dplyr::select(sample,site,LogRatio)%>%
-  tidyr::pivot_wider(values_from=LogRatio,names_from=sample,
-                     values_fn=list(LogRatio=mean))%>%#,values_fill=list(LogRatio=0.0))%>%
-  tibble::remove_rownames()%>%
-  tibble::column_to_rownames('site')
+<!-- fullPhosMat<-uncorrectedPhosData%>%dplyr::select(sample,site,LogRatio)%>% -->
+<!--   tidyr::pivot_wider(values_from=LogRatio,names_from=sample, -->
+<!--                      values_fn=list(LogRatio=mean))%>%#,values_fill=list(LogRatio=0.0))%>% -->
+<!--   tibble::remove_rownames()%>% -->
+<!--   tibble::column_to_rownames('site') -->
 
- uncorrectedKinDat<-mapPhosphoToKinase(dplyr::rename(uncorrectedPhosData,Sample='sample', LogFoldChange='LogRatio'))
+<!--  uncorrectedKinDat<-mapPhosphoToKinase(dplyr::rename(uncorrectedPhosData,Sample='sample', LogFoldChange='LogRatio')) -->
 
- combPhos<-list(comb_5min=limmaTwoFactorDEAnalysis(fullPhosMat,
-                          filter(summary,conditionName=='MOLM-13_5_Trametinib+MCP-1')$sample,
-                          filter(summary,conditionName%in%c('MOLM-13_5_Trametinib','MOLM-13_5_MCP-1'))$sample),
-                 comb_60min=limmaTwoFactorDEAnalysis(fullPhosMat,
-                          filter(summary,conditionName=='MOLM-13_60_Trametinib+MCP-1')$sample,
-                          filter(summary,conditionName%in%c('MOLM-13_60_Trametinib','MOLM-13_60_MCP-1'))$sample))
-##now we can load this into a network
-```
+<!--  combPhos<-list(comb_5min=limmaTwoFactorDEAnalysis(fullPhosMat, -->
+<!--                           filter(summary,conditionName=='MOLM-13_5_Trametinib+MCP-1')$sample, -->
+<!--                           filter(summary,conditionName%in%c('MOLM-13_5_Trametinib','MOLM-13_5_MCP-1'))$sample), -->
+<!--                  comb_60min=limmaTwoFactorDEAnalysis(fullPhosMat, -->
+<!--                           filter(summary,conditionName=='MOLM-13_60_Trametinib+MCP-1')$sample, -->
+<!--                           filter(summary,conditionName%in%c('MOLM-13_60_Trametinib','MOLM-13_60_MCP-1'))$sample)) -->
+<!-- ##now we can load this into a network -->
+<!-- ``` -->
