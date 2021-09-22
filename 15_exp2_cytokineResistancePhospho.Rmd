@@ -225,12 +225,12 @@ phosMat <- latePhosMat
 summary <- lateSummary
 #phosMat<-fullPhosMat
 #phosData<-uncorrectedPhosData
-m13Phos<-list(Tram_vs_control=limmaTwoFactorDEAnalysis(phosMat,    
-                        filter(summary,conditionName=='Late MOLM-13_0_Trametinib')$sample,
-                         filter(summary,conditionName=='MOLM-13_0_none')$sample),
+m13Phos<-list(Tram_vs_control=limmaTwoFactorDEAnalysis(phosMat,
+                         filter(summary,conditionName=='MOLM-13_0_none')$sample,    
+                        filter(summary,conditionName=='Late MOLM-13_0_Trametinib')$sample),
             TramMCP1_vs_control=limmaTwoFactorDEAnalysis(phosMat,
-                        filter(summary,conditionName=='Late MOLM-13_0_Trametinib+MCP-1')$sample,
-                         filter(summary,conditionName=='MOLM-13_0_none')$sample),
+                         filter(summary,conditionName=='MOLM-13_0_none')$sample,
+                        filter(summary,conditionName=='Late MOLM-13_0_Trametinib+MCP-1')$sample),
               TramMCP1_vs_Tram=limmaTwoFactorDEAnalysis(phosMat,
                          filter(summary,conditionName=='Late MOLM-13_0_Trametinib')$sample,             
                          filter(summary,conditionName=='Late MOLM-13_0_Trametinib+MCP-1')$sample))
