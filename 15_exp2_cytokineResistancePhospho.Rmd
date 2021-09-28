@@ -41,7 +41,8 @@ lateSummary<-phosData%>%
     subset(Batch=='Experiment 2')%>%
   dplyr::select(sample,CellType,TimePoint,Treatment,Batch)%>%
   distinct()%>%
-  mutate(conditionName=stringr::str_c(CellType,TimePoint,Treatment,sep='_'))
+  mutate(conditionName=stringr::str_c(CellType,TimePoint,Treatment,sep='_'))%>%
+  subset(TimePoint==0)
 
 
 earlyPhosMat<-phosData%>%
@@ -55,6 +56,7 @@ earlyPhosMat<-phosData%>%
 
 
 latePhosMat<-phosData%>%
+  subset(TimePoint==0)%>%
   subset(Batch=='Experiment 2')%>%
   dplyr::select(sample,site,LogRatio)%>%
   tidyr::pivot_wider(values_from=LogRatio,names_from=sample,
@@ -63,14 +65,14 @@ latePhosMat<-phosData%>%
   tibble::column_to_rownames('site')
 ```
 
-## Now we can define the processing functions needed
+## Experiment 2 data
 
 
-We can plot the data and the kinase activity as needed in heatmap or PCA form.
+We can plot the data and the kinase activity as needed in heatmap or PCA form. Here we want to visualize only the samples measured in Experiment 2 (minute the 120 min time point)
 ```{r processing functions,echo=TRUE,warning=FALSE}
 ##
 #' @param dat.table
-plotAllData<-function(dat.table){
+plotAllData<-function(dat.table,prefix=''){
   library(ggfortify)
   met<-dat.table%>%dplyr::select(sample,CellType,TimePoint,Treatment)%>%
     distinct()
@@ -82,8 +84,11 @@ plotAllData<-function(dat.table){
   tibble::remove_rownames()%>%
     tibble::column_to_rownames('Gene')
   
-  autoplot(prcomp(t(mat)),data=met,colour='Treatment',shape='CellType')
- 
+  
+  p<-autoplot(prcomp(t(mat)),data=met,colour='Treatment',shape='CellType')
+  
+  ggsave(file=paste0('pcaPlot',prefix,'.pdf'),p, device='pdf')
+  return(p) 
 }
 
 ##plot kinase activity
@@ -144,7 +149,13 @@ plotKinDat<-function(kindat,sig.kin=NULL,prefix='all'){
 ####Show kinase activity
 kindat<-mapPhosphoToKinase(dplyr::rename(phosData,Sample='sample', LogFoldChange='LogRatio'))
 
+##plot PCA
+phosData%>%
+  subset(Batch=='Experiment 2')%>%
+  subset(TimePoint==0)%>%
+  plotAllData('Experiment 2')
 ```
+
 
 ## KSEA enrichment analysis
 
@@ -167,7 +178,7 @@ doAllKSEAplots<-function(condList,pdat=phosData){
       tibble::rownames_to_column('site')%>%
       left_join(gene.to.site)%>%
       dplyr::select(Gene,Peptide,residue,value='logFC',p_adj='adj.P.Val')%>%
-      amlresistancenetworks::computeKSEA(.,prefix=clName,0.1,linkedSubs=1)%>%
+      amlresistancenetworks::computeKSEA(.,prefix=clName,0.1,linkedSubs=1,suffix='pdf')%>%
       mutate(Condition=clName)%>%
       as.data.frame()
   })
@@ -204,7 +215,7 @@ runNetworksFromDF<-function(data,gene.col='Kinase.Gene',
 }
 ```
 
-### Early time course comparisons
+### Combination time course comparisons
 
 We want to identify changes in each condition at 5 min and 60 min compare to zero.
 
@@ -214,12 +225,12 @@ phosMat <- latePhosMat
 summary <- lateSummary
 #phosMat<-fullPhosMat
 #phosData<-uncorrectedPhosData
-m13Phos<-list(Tram_vs_control=limmaTwoFactorDEAnalysis(phosMat,    
-                        filter(summary,conditionName=='Late MOLM-13_0_Trametinib')$sample,
-                         filter(summary,conditionName=='MOLM-13_0_none')$sample),
+m13Phos<-list(Tram_vs_control=limmaTwoFactorDEAnalysis(phosMat,
+                         filter(summary,conditionName=='MOLM-13_0_none')$sample,    
+                        filter(summary,conditionName=='Late MOLM-13_0_Trametinib')$sample),
             TramMCP1_vs_control=limmaTwoFactorDEAnalysis(phosMat,
-                        filter(summary,conditionName=='Late MOLM-13_0_Trametinib+MCP-1')$sample,
-                         filter(summary,conditionName=='MOLM-13_0_none')$sample),
+                         filter(summary,conditionName=='MOLM-13_0_none')$sample,
+                        filter(summary,conditionName=='Late MOLM-13_0_Trametinib+MCP-1')$sample),
               TramMCP1_vs_Tram=limmaTwoFactorDEAnalysis(phosMat,
                          filter(summary,conditionName=='Late MOLM-13_0_Trametinib')$sample,             
                          filter(summary,conditionName=='Late MOLM-13_0_Trametinib+MCP-1')$sample))
