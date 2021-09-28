@@ -23,6 +23,11 @@ source("../util/synapseUtil.R")
 
 syn <- synapseLogin()
 
+```
+
+```{r making long table}
+## CrossTab
+
 crossTab <- querySynapseTable("syn26164951")
 rownames(crossTab) <- crossTab$Protein
 
@@ -38,11 +43,26 @@ long <- left_join(long, metadata, by = "Sample") %>%
   subset(!is.na(Intensity)) %>%
   arrange(Protein)
 
+### Targeted crosstab
+targeted.CrossTab <- querySynapseTable("syn26180963") %>%
+  rename(Protein = `Protein Name`)
+rownames(targeted.CrossTab) <- targeted.CrossTab$`Peptide Sequence`
+
+targeted.long <- pivot_longer(targeted.CrossTab, cols = 3:36,
+                              names_to = "Sample", values_to = "Intensity")
+
+## merge with metadata
+targeted.long <- left_join(targeted.long, metadata, by = "Sample") %>%
+  subset(!is.na(Intensity)) %>%
+  arrange(Protein)
+
 ```
+
 
 ```{r push to synapse}
 name <- "DIA Data Longform"
 
-synTableStore(long, name, parentId='syn22128879')
+synTableStore(long, name, parentId = 'syn22128879')
+synTableStore(targeted.long, "DIA Targeted Data Longform", parentId = 'syn22128879')
 ```
 

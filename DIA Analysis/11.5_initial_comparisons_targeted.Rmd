@@ -1,0 +1,329 @@
+---
+title: "DIA targeted differential expression & GSEA"
+author: "Camilo Posso"
+date: "09/13/2021"
+output: 
+  html_document:
+    code_folding: hide
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+```{r libraries, include=FALSE}
+library(kableExtra)
+library(gridExtra)
+library(dplyr)
+library(MSnSet.utils)
+library(ggplot2)
+library(clusterProfiler)
+library(amlresistancenetworks)
+source("../util/synapseUtil.R")
+source("../util/loadData.R")
+
+## Using synapse ID to fecth table + metadata
+dat <- load.DIA.data("syn26182854")
+
+prot.dat <- dat[["Long form data"]]
+meta <- dat[["Metadata"]] 
+colnames(meta)[4] <- "Trametinib"
+rownames(meta) <- meta$Sample
+
+## Turning long form into matrix
+## for any peptides with the same parent protein we average intensity.
+prot.mat <- prot.dat %>%
+  select(Protein, Sample, Intensity) %>%
+  tidyr::pivot_wider(values_from='Intensity',names_from='Sample',
+                     values_fn=list(Intensity = mean)) %>%
+  tibble::column_to_rownames('Protein') %>%
+  as.matrix()
+
+## Creating MSnSet using the crosstab and metadata
+m <- MSnSet(exprs = prot.mat, pData = meta)
+
+```
+
+Below we have the metadata for this experiment. We have a total of 34 samples
+and 11 proteins after rolling up from peptide level data. 
+The samples are split in two ways: there are `Pre` and `Post` treatment
+groups, as well as 3 cell types, `CD14`, `CD34` and `MNC`. In this initial analysis we
+compare the `Pre` and `Post` groups within each cell type and across cell types, we also
+compare each pair of cell types to each other.
+
+The targeted data has intensities present for all 34 samples. We have rolled up from the 
+peptide level to the protein level
+
+```{r pressure, echo=FALSE}
+show <- meta %>%
+  select(-Sample)
+kbl(show) %>%
+  kable_paper("hover", full_width = F)
+
+```
+
+$$\\[.2in]$$
+
+# PCA plots
+
+Below we collect two PCA plots for this data: by treatment, and by cell type.
+
+```{r PCA by treatment}
+p <- plot_pca_v4(m, "Trametinib", show.ellipse = F) +
+  ggtitle("PCA by Treatment") + 
+  theme(plot.title = element_text(size = 13, hjust = 0.5))
+
+p
+
+```
+
+
+
+```{r PCA by cell type}
+p <- plot_pca_v4(m, "CellType", show.ellipse = F) +
+  ggtitle("PCA by Cell Type") + 
+  theme(plot.title = element_text(size = 13, hjust = 0.5))
+
+p
+
+```
+
+$$\\[.2in]$$
+
+# Pre-Trametinib vs Post-Trametinib
+
+Next, we compare the Pre and Post treatment groups within each cell type individually.
+
+
+```{r run differential expression, include=FALSE}
+
+diff.results <- list()
+
+for (type in c("CD14", "CD34", "MNC")) {
+  xx <- prot.mat[, meta$CellType == type]
+  
+  pre.cols <- colnames(xx)[grepl("Pre", colnames(xx))]
+  post.cols <- colnames(xx)[grepl("Post", colnames(xx))]
+
+  limma <- limmaTwoFactorDEAnalysis(xx, pre.cols, post.cols)
+  
+  diff.results[[type]] <- limma
+}
+
+```
+
+$$\\[.1in]$$
+
+### CD14 Cell Type
+
+Restricting to those `CD14` cell types, we compare the pre and post-treatment group using differential
+expression.
+
+
+```{r CD14 differential expression show}
+show <- diff.results[["CD14"]] %>%
+  select(-featureID, -t, -B, -AveExpr) %>% head(.)
+kbl(show) %>%
+  kable_paper("hover", full_width = F)
+
+```
+
+
+$$\\[.1in]$$
+
+### CD34 Cell Type
+
+Restricting to those `CD34` cell types, we compare the pre and post-treatment group using differential
+expression.
+
+
+```{r CD34 differential expression show}
+show <- diff.results[["CD34"]] %>%
+  select(-featureID, -t, -B, -AveExpr) %>% head(.)
+kbl(show) %>%
+  kable_paper("hover", full_width = F)
+
+```
+
+$$\\[.1in]$$
+
+### MNC Cell Type
+
+Restricting to those `MNC` cell types, we compare the pre and post-treatment group using differential
+expression.
+
+
+```{r MNC differential expression show}
+show <- diff.results[["MNC"]] %>%
+  select(-featureID, -t, -B, -AveExpr) %>% head(.)
+kbl(show) %>%
+  kable_paper("hover", full_width = F)
+
+```
+
+$$\\[.1in]$$
+
+### Pre vs Post (All cell types)
+
+
+```{r Pre vs Post (all cells), include=FALSE}
+
+xx <- prot.mat
+
+pre.cols <- colnames(xx)[grepl("Pre", colnames(xx))]
+post.cols <- colnames(xx)[grepl("Post", colnames(xx))]
+
+limma <- limmaTwoFactorDEAnalysis(xx, pre.cols, post.cols) 
+
+```
+
+We also compare the two treatment groups without restricting the cell type.=
+
+```{r all cells differential expression show}
+show <- limma %>%
+  select(-featureID, -t, -B, -AveExpr) %>% head(.)
+kbl(show) %>%
+  kable_paper("hover", full_width = F)
+
+```
+
+
+$$\\[.2in]$$
+
+# Comparing Cell Types
+
+Next, we compare all the cell types to each other, pair by pair. 
+We again use differential expression and GSEA with the KEGG database in order 
+to compare the groups.
+
+```{r cell type comparisons, include=FALSE}
+limma.results <- list()
+
+for (type in c("CD14", "CD34", "MNC")) {
+  types <- meta$CellType != type
+  xx <- prot.mat[, types]
+  
+  types <- unique(meta$CellType[types])
+  group1 <- colnames(xx)[grepl(types[1], colnames(xx))]
+  group2 <- colnames(xx)[grepl(types[2], colnames(xx))]
+  
+  limma <- limmaTwoFactorDEAnalysis(xx, group1, group2)
+  limma.results[[type]] <- limma
+}
+
+```
+
+$$\\[.1in]$$
+
+### CD14 vs CD34
+
+We remove the `MNC` samples, then compare the `CD14` and `CD34` cell types using 
+differential expression.
+
+
+```{r cell types MNC differential expression show}
+show <- limma.results[["MNC"]] %>%
+  select(-featureID, -t, -B, -AveExpr) %>% head(.)
+kbl(show) %>%
+  kable_paper("hover", full_width = F)
+
+```
+
+$$\\[.1in]$$
+
+### CD34 vs MNC
+
+We remove the `CD14` samples, then compare the `CD34` and `MNC` cell types using 
+differential expression.
+
+
+```{r cell types CD14 differential expression show}
+show <- limma.results[["CD14"]] %>%
+  select(-featureID, -t, -B, -AveExpr) %>% head(.)
+kbl(show) %>%
+  kable_paper("hover", full_width = F)
+
+```
+
+$$\\[.1in]$$
+
+### CD14 vs MNC
+
+We remove the `CD34` samples, then compare the `CD14` and `MNC` cell types using 
+differential expression.
+
+
+```{r cell types CD34 differential expression show}
+show <- limma.results[["CD34"]] %>%
+  select(-featureID, -t, -B, -AveExpr) %>% head(.)
+kbl(show) %>%
+  kable_paper("hover", full_width = F)
+
+```
+
+
+# Plotting the proteins
+
+Finally, we make boxplots of the 11 proteins, grouped by treatment and cell type.
+
+```{r boxplotting intensities, include=FALSE}
+proteins <- rownames(prot.mat)
+
+plots <- list()
+
+for (protein in proteins){
+  xx <- data.frame(Intensity = prot.mat[protein, ], Sample = colnames(prot.mat)) %>%
+    left_join(meta, by = "Sample") %>%
+    mutate(Trametinib = factor(Trametinib, levels = c("Pre", "Post")))
+  
+  p <- ggplot(xx, aes(y = Intensity, fill = CellType, x = Trametinib)) + geom_boxplot() +
+    ggtitle(protein) + theme(plot.title = element_text(hjust = 0.5, size = 10),
+                             axis.title.x = element_text(size = 8),
+                             axis.title.y = element_text(size = 8))
+  
+  plots[[protein]] <- p
+}
+
+```
+
+
+```{r show plots 1}
+layout <- rbind(c(1,1,2,2),
+                c(3,3,4,4))
+
+grid.arrange(grobs = plots[1:4], layout_matrix = layout)
+
+```
+
+
+```{r show plots 2}
+layout <- rbind(c(5,5,6,6),
+                c(7,7,8,8))
+
+grid.arrange(grobs = plots[5:8], layout_matrix = layout)
+
+```
+
+
+```{r show plots 3}
+layout <- rbind(c(9,9,10,10),
+                c(NA,11,11,NA))
+
+grid.arrange(grobs = plots[9:11], layout_matrix = layout)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+

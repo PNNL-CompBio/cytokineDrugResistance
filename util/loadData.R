@@ -4,6 +4,8 @@ load.DIA.data <- function(syn){
                "TrametinibTreatment", "CellCount", "Date")
   meta <- data[, columns] %>%
     unique()
+  meta <- meta[order(meta$CellType, meta$Trametinib), ]
+  
   
   return(list("Long form data" = data, "Metadata" = meta))
 }

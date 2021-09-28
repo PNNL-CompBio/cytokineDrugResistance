@@ -1,0 +1,553 @@
+---
+title: "CD14 Cell Line"
+author: "Camilo Posso"
+date: "09/27/2021"
+output: 
+  html_document:
+    code_folding: hide
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+```{r libraries, include=FALSE}
+library(kableExtra)
+library(gridExtra)
+library(dplyr)
+library(MSnSet.utils)
+library(ggplot2)
+library(clusterProfiler)
+library(amlresistancenetworks)
+source("../util/synapseUtil.R")
+source("../util/loadData.R")
+
+## Using synapse ID to fecth table + metadata
+dat <- load.DIA.data("syn26164985")
+
+prot.dat <- dat[["Long form data"]]
+meta <- dat[["Metadata"]] 
+colnames(meta)[4] <- "Trametinib"
+rownames(meta) <- meta$Sample
+
+## Turning long form into matrix
+prot.mat <- prot.dat %>%
+  select(Protein, Sample, Intensity) %>%
+  tidyr::pivot_wider(values_from='Intensity',names_from='Sample',
+                     values_fn=list(Intensity = mean)) %>%
+  tibble::column_to_rownames('Protein') %>%
+  as.matrix()
+
+```
+
+
+```{r subset to cell line and define params, include=FALSE}
+cell.line <- "CD14"
+meta <- meta[meta$CellType == cell.line, ]
+
+prot.mat <- prot.mat[, grepl(cell.line, colnames(prot.mat))]
+n.samples <- ncol(prot.mat)
+
+## Filter out fully NA rows
+idx <- rowSums(is.na(prot.mat)) == ncol(prot.mat)
+prot.mat <- prot.mat[!idx, ]
+
+## 10 hand picked colors, chosen to be distinct from each other (normal color vision)
+colors.chosen <- c("darkorange2", "dodgerblue2", "firebrick3",
+                   "lawngreen", "gray69", "darkorchid1", 
+                   "forestgreen", "navy", "deeppink2",
+                   "lightsteelblue2", "goldenrod1")
+names(colors.chosen) <- colnames(prot.mat)
+
+```
+
+
+
+```{r restrict samples}
+restrict <- F
+
+if (restrict) {
+  samples <- sort(colSums(is.na(prot.mat)))[1:6] %>%
+    names()
+} else {
+  samples <- sort(colSums(is.na(prot.mat))) %>%
+    names()
+}
+
+prot.mat <- prot.mat[, samples]
+
+colors.use <- colors.chosen[samples]
+
+meta <- meta[rownames(meta) %in% samples, ]
+
+## Filter out fully NA rows
+idx <- rowSums(is.na(prot.mat)) == ncol(prot.mat)
+prot.mat <- prot.mat[!idx, ]
+
+## Creating MSnSet using the crosstab and metadata
+m <- MSnSet(exprs = prot.mat, pData = meta[colnames(prot.mat), ])
+
+```
+
+
+```{r functions, include=FALSE}
+
+filter.DreamAI <- function(mat, prop.NA, step) {
+
+  # remove rows where all data is NA
+  print(nrow(mat))
+  mat <- mat[rowSums(is.na(mat)) != ncol(mat), ]
+  print(nrow(mat))
+  
+  # Any features with more than 90% missing data are thrown out. Needed for using
+  # DreamAI!! using a slightly stricter filter in order to obtain under 90% missing
+  # in the columns as well!!
+  N <- ncol(mat)
+  keeping <- rowSums(is.na(mat)) < prop.NA*N 
+  mat <- mat[keeping, ]
+  
+  ## Even with the filtering above, we still have a few columns with 93% or so 
+  ## missing data so we have to drop a few more rows, strategically.
+
+  while(any(colSums(is.na(mat)) >= 0.9*nrow(mat))){
+    
+  ## We weigh each intensity from a particular sample according to how much data
+  ## that sample is missing. Then we aggregate these into a feature score.
+  ## For a given feature, the higher the score, the more intensities from highly 
+  ## missing samples are present in that feature.
+  weights <- colSums(is.na(mat))/(0.9*nrow(mat))
+  weights <- matrix(weights, nrow = nrow(mat), ncol = 30, byrow = TRUE)
+  
+  score <- as.numeric(!is.na(mat))*weights
+  rownames(score) <- rownames(mat)
+  importance <- rowSums(score) %>%
+    sort(decreasing = F) %>%
+    names()
+  
+  keeping <- importance[step:length(importance)]
+  mat <- mat[keeping, ]
+  }
+  
+  return(mat)
+}
+
+
+make.NA <- function(mat, pseudo.NA) {
+  
+  present <- which(!is.na(mat))
+  total <- nrow(mat)*ncol(mat)
+  
+  N <- length(present)*pseudo.NA
+  pseudo.missing <- sample(present, N)
+  
+  mat[pseudo.missing] <- NA
+  missing.index <- arrayInd(pseudo.missing, c(nrow(mat), ncol(mat)))
+  missing.index[, 1] <- rownames(mat)[missing.index[, 1]]
+  missing.index[, 2] <- colnames(mat)[as.numeric(missing.index[, 2])]
+  return(list("data" = mat, "pseudo NA index" = missing.index))
+}
+
+
+```
+
+
+```{r prepare datasets}
+
+params.NA <- c(0.2, 0.4, 0.6)
+params.pseudoNA <- c(0.1, 0.1, 0.1)
+
+```
+
+
+Below we have the metadata for this experiment. We have a total of `r n.samples` samples
+and `r nrow(prot.mat)` Proteins. In this initial analysis we compare the `Pre` and 
+`Post` groups, and investigate whether the imputation of the missing values is meaningful.
+
+```{r pressure, echo=FALSE}
+show <- meta %>%
+  select(-Sample)
+kbl(show) %>%
+  kable_paper("hover", full_width = F)
+
+```
+
+$$\\[.2in]$$
+
+# Missing data
+
+First, notice the large amount of missing values present. Below we summarize the distribution
+of NA values in the data by counting the number of missing intensities per protein.
+
+
+```{r missing data, include=FALSE}
+library(scales)
+
+missing <- rowSums(is.na(prot.mat))
+dff.missing = data.frame(missing = missing)
+
+breaks = seq(-0.25, ncol(prot.mat) + 0.25, 0.5)
+
+p1 <- ggplot(dff.missing, aes(x = missing)) + geom_histogram(breaks = breaks) +
+  ylab("") + xlab("Number missing") +
+  ggtitle("Number missing per protein") +
+  scale_x_continuous(breaks = pretty_breaks()) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+dff.sample.missing <- data.frame(missing = colSums(is.na(prot.mat)),
+                                 Sample = colnames(prot.mat))
+  
+p2 <- ggplot(dff.sample.missing, aes(x = Sample, fill = Sample, y = missing)) +
+  geom_bar(stat = "identity") +
+  ggtitle("Missing per sample") + 
+  theme(plot.title = element_text(hjust = 0.5, size = 13),
+        axis.text.x = element_text(vjust = 0.5, angle = 90)) +
+  scale_fill_manual(values = colors.use) 
+
+complete.features <- length(which(rowSums(is.na(prot.mat)) == 0))
+
+
+```
+
+
+
+```{r}
+p1
+
+```
+
+
+```{r}
+p2
+
+```
+
+
+$$\\[.2in]$$
+
+# PCA plots
+
+Note that only the `r complete.features` proteins with no missing data can be 
+used when making a PCA plot.
+
+```{r PCA by treatment}
+p <- plot_pca_v4(m, "Trametinib", show.ellipse = F) +
+  ggtitle("PCA by Treatment") + 
+  theme(plot.title = element_text(size = 13, hjust = 0.5))
+
+p
+
+```
+
+
+
+$$\\[.2in]$$
+
+# Pre-Trametinib vs Post-Trametinib
+
+```{r include=FALSE}
+missing.fraction <- 0.6
+
+```
+
+Next, we compare the Pre and Post treatment groups within each cell type individually.
+Due to the large amount of missing data, we first restrict the samples by cell type, then 
+filter the proteins such that at most `r missing.fraction*100`% of the data is missing 
+within that cell type.
+
+```{r run GSEA comparisons by cell, include=FALSE}
+
+xx <- prot.mat
+chosen.features <- xx %>%
+  is.na() %>%
+  rowSums()
+chosen.features <- which(chosen.features <= ncol(xx)*missing.fraction) %>%
+  names()
+
+xx <- xx[chosen.features, ]
+n.features <- length(chosen.features)
+
+pre.cols <- colnames(xx)[grepl("Pre", colnames(xx))]
+pre.means <- apply(xx[, pre.cols], 1, mean, na.rm = T)
+post.cols <- colnames(xx)[grepl("Post", colnames(xx))]
+post.means <- apply(xx[, post.cols], 1, mean, na.rm = T)
+
+log.fold.change <- post.means - pre.means
+log.fold.change <- sort(log.fold.change, decreasing = T)
+
+set.seed(117)
+rank.GSEA <- gseKEGG(geneList = log.fold.change,
+               organism     = 'hsa',
+               minGSSize    = 10,
+               pvalueCutoff = 1,
+               verbose      = T,
+               keyType = 'uniprot')
+
+
+```
+
+
+```{r run differential expression, include=FALSE}
+
+xx <- prot.mat
+chosen.features <- xx %>%
+  is.na() %>%
+  rowSums()
+chosen.features <- which(chosen.features <= ncol(xx)*missing.fraction) %>%
+  names()
+
+xx <- xx[chosen.features, ]
+
+pre.cols <- colnames(xx)[grepl("Pre", colnames(xx))]
+post.cols <- colnames(xx)[grepl("Post", colnames(xx))]
+
+limma <- limmaTwoFactorDEAnalysis(xx, pre.cols, post.cols)
+
+```
+
+
+
+# Imputation
+
+Next, we try to test how far off imputed values are from their original
+observed values. We do this by introducing `NEW` NA values to the dataset at random,
+which we call pseudo NA values. We then compare the value imputed for the pseudo 
+NA values to the original observed value. We do this a few times, filtering the 
+original dataset at different levels each time.
+
+
+```{r imputation test, include=FALSE}
+library("cluster")
+library("survival")
+library("randomForest")
+library("missForest")
+library("glmnet")
+library("Rcpp")
+library("foreach")
+library("itertools")
+library("iterators")
+library("Matrix")
+library("impute")
+library("DreamAI")
+
+results <- list()
+results.missing <- list()
+results.count <- list()
+
+set.seed(117)
+for (i in 1:length(params.NA)) {
+  param.NA <- params.NA[i]
+  param.pNA <- params.pseudoNA[i]
+  
+  mat <- filter.DreamAI(prot.mat, param.NA, 3)
+  
+  mat.NA <- make.NA(mat, param.pNA)
+  new.NA <- mat.NA$`pseudo NA index`
+  mat.NA <- mat.NA$data
+  mat.NA <- filter.DreamAI(mat.NA, 0.9, 3)
+
+  mat.NA <- DreamAI(mat.NA,k=10,maxiter_MF = 10, ntree = 100,maxnodes = NULL,
+                    maxiter_ADMIN=30, tol=10^(-2),gamma_ADMIN=0,gamma=50,
+                    CV=FALSE,fillmethod="row_mean",maxiter_RegImpute=10,
+                    conv_nrmse = 1e-6,iter_SpectroFM=40, out="Ensemble",
+                    method = c("KNN", "ADMIN", "Brinn", 
+                               "SpectroFM", "RegImpute"))[["Ensemble"]]
+  
+  new.NA <- new.NA[new.NA[, 1] %in% rownames(mat.NA), ]
+  impute.diff <- mat.NA[new.NA[, 1], ] - mat[new.NA[, 1], ]
+  impute.diff <- sapply(1:nrow(impute.diff), function(x) {
+    impute.diff[x, new.NA[x, 2]]
+  })
+  impute.diff <- data.frame(Difference = impute.diff,
+                            Sample = new.NA[, 2]) %>%
+    filter(!is.na(Difference))
+
+  name <- paste("param NA", param.NA, "param pNA", param.pNA)
+  print(name)
+  results[[name]] <- impute.diff
+  
+  dff.missing <- colSums(is.na(mat))
+  dff.missing <- data.frame(Sample = names(dff.missing), Missing = dff.missing)
+  results.missing[[name]] <- dff.missing
+  results.count[[name]] <- nrow(mat.NA)
+  
+}
+
+```
+
+
+
+### Differential Expression & GSEA
+
+
+Using these proteins, we compare the pre and post-treatment group using differential
+expression and rank based GSEA with the KEGG database.
+
+
+```{r CD14 differential expression show}
+show <- limma %>%
+  select(-featureID, -t, -B, -AveExpr) %>% head(.)
+kbl(show) %>%
+  kable_paper("hover", full_width = F)
+
+```
+
+As no pathway showed significant enrichment, we show the most significantly
+enriched pathways instead.
+
+```{r Rank Based GSEA CD14 show}
+show <- rank.GSEA %>%
+  select(Description, setSize, NES, pvalue, p.adjust) %>%
+  head(10)
+
+kbl(show) %>%
+  kable_paper("hover", full_width = T)
+```
+
+
+### At most `r params.NA[1]*100`% missing per protein, `r params.pseudoNA[1]*100`% pseudo NA introduced.
+
+
+```{r show differences 1, include=FALSE}
+name <- paste("param NA", params.NA[1], "param pNA", params.pseudoNA[1])
+
+dff <- results[[name]]
+dff.missing <- results.missing[[name]]
+
+p1 <- ggplot(dff, aes(x = Difference, fill = Sample)) + geom_histogram(breaks = seq(-5.25,5.25,0.5)) +
+  ggtitle("Difference between original & pseudo NA imputed") +
+  theme(plot.title = element_text(hjust = 0.5, size = 13)) +
+  scale_fill_manual(values = colors.use)
+
+p2 <- ggplot(dff.missing, aes(x = Sample, y = Missing, fill = Sample)) + geom_bar(stat = "identity") +
+  ggtitle("Missing per sample") + 
+  theme(plot.title = element_text(hjust = 0.5, size = 13),
+        axis.text.x = element_text(vjust = 0.5, angle = 90)) +
+  scale_fill_manual(values = colors.use) 
+
+MSE <- sqrt(sum((dff$Difference)^2)/nrow(dff))
+
+```
+
+
+
+We filter the original data to have at most `r params.NA[1]*100`% of its entries per protein
+as NA values. We then randomly choose `r params.pseudoNA[1]*100`% of the
+present intensities and replace them with NA values. Our imputed dataset
+has `r results.count[1]` proteins in total. Below we see the distribution 
+of the differences between the imputed (pseudo NA) values and the original values. 
+
+The mean squared error between the imputed pseudo NA values and the original 
+values is `r MSE`.
+
+
+```{r}
+p1
+
+```
+
+```{r}
+p2
+
+```
+
+
+
+### At most `r params.NA[2]*100`% missing per protein, `r params.pseudoNA[2]*100`% pseudo NA introduced.
+
+
+
+```{r show differences 2, include=FALSE}
+name <- paste("param NA", params.NA[2], "param pNA", params.pseudoNA[2])
+
+dff <- results[[name]]
+dff.missing <- results.missing[[name]]
+
+p1 <- ggplot(dff, aes(x = Difference, fill = Sample)) + geom_histogram(breaks = seq(-5.25,5.25,0.5)) +
+  ggtitle("Difference between original & pseudo NA imputed") +
+  theme(plot.title = element_text(hjust = 0.5, size = 13)) +
+  scale_fill_manual(values = colors.use)
+
+p2 <- ggplot(dff.missing, aes(x = Sample, y = Missing, fill = Sample)) + geom_bar(stat = "identity") +
+  ggtitle("Missing per sample") + 
+  theme(plot.title = element_text(hjust = 0.5, size = 13),
+        axis.text.x = element_text(vjust = 0.5, angle = 90)) +
+  scale_fill_manual(values = colors.use) 
+
+MSE <- sqrt(sum((dff$Difference)^2)/nrow(dff))
+
+```
+
+
+
+We filter the original data to have at most `r params.NA[2]*100`% of its entries per protein
+as NA values. We then randomly choose `r params.pseudoNA[2]*100`% of the
+present intensities and replace them with NA values.  Our imputed dataset
+has `r results.count[2]` proteins in total. Below we see the distribution 
+of the differences between the imputed (pseudo NA) values and the original values. 
+
+The mean squared error between the imputed pseudo NA values and the original 
+values is `r MSE`.
+
+
+```{r}
+p1
+
+```
+
+```{r}
+p2
+
+```
+
+### At most `r params.NA[3]*100`% missing per protein, `r params.pseudoNA[3]*100`% pseudo NA introduced.
+
+
+
+```{r show differences 3, include=FALSE}
+name <- paste("param NA", params.NA[3], "param pNA", params.pseudoNA[3])
+
+dff <- results[[name]]
+dff.missing <- results.missing[[name]]
+
+p1 <- ggplot(dff, aes(x = Difference, fill = Sample)) + geom_histogram(breaks = seq(-5.25,5.25,0.5)) +
+  ggtitle("Difference between original & pseudo NA imputed") +
+  theme(plot.title = element_text(hjust = 0.5, size = 13)) +
+  scale_fill_manual(values = colors.use)
+
+p2 <- ggplot(dff.missing, aes(x = Sample, y = Missing, fill = Sample)) + geom_bar(stat = "identity") +
+  ggtitle("Missing per sample") + 
+  theme(plot.title = element_text(hjust = 0.5, size = 13),
+        axis.text.x = element_text(vjust = 0.5, angle = 90))  +
+  scale_fill_manual(values = colors.use)
+
+MSE <- sqrt(sum((dff$Difference)^2)/nrow(dff))
+
+```
+
+
+
+We filter the original data to have at most `r params.NA[3]*100`% of its entries per protein
+as NA values. We then randomly choose `r params.pseudoNA[3]*100`% of the
+present intensities and replace them with NA values.  Our imputed dataset
+has `r results.count[3]` proteins in total. Below we see the distribution 
+of the differences between the imputed (pseudo NA) values and the original values. 
+
+
+The mean squared error between the imputed pseudo NA values and the original 
+values is `r MSE`.
+
+
+```{r}
+p1
+
+```
+
+```{r}
+p2
+
+```
+
+

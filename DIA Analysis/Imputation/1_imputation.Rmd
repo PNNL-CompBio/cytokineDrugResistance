@@ -1,0 +1,284 @@
+---
+title: "DIA imputation testing"
+author: "Camilo Posso"
+date: "09/21/2021"
+output: 
+  html_document:
+    code_folding: hide
+    toc: true
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+```{r libraries, include=FALSE}
+library(kableExtra)
+library(gridExtra)
+library(dplyr)
+library(MSnSet.utils)
+library(ggplot2)
+library(clusterProfiler)
+library(amlresistancenetworks)
+source("../../util/synapseUtil.R")
+source("../../util/loadData.R")
+
+## Using synapse ID to fecth table + metadata
+dat <- load.DIA.data("syn26164985")
+
+prot.dat <- dat[["Long form data"]]
+meta <- dat[["Metadata"]] 
+colnames(meta)[4] <- "Trametinib"
+rownames(meta) <- meta$Sample
+
+## Turning long form into matrix
+## for any peptides with the same parent protein we average intensity.
+prot.mat <- prot.dat %>%
+  select(Protein, Sample, Intensity) %>%
+  tidyr::pivot_wider(values_from='Intensity',names_from='Sample',
+                     values_fn=list(Intensity = mean)) %>%
+  tibble::column_to_rownames('Protein') %>%
+  as.matrix()
+
+## Creating MSnSet using the crosstab and metadata
+m <- MSnSet(exprs = prot.mat, pData = meta)
+
+```
+
+Below we have the metadata for this experiment. We have a total of 30 samples
+and `r nrow(data)` proteins. 
+The samples are split in two ways: there are `Pre` and `Post` treatment
+groups, as well as 3 cell types, `CD14`, `CD34` and `MNC`. 
+
+```{r pressure, echo=FALSE}
+show <- meta %>%
+  select(-Sample)
+kbl(show) %>%
+  kable_paper("hover", full_width = F)
+
+```
+
+
+The goal of this particular markdown is to determine how stable the DreamAI consensus 
+imputation is when applied to the DIA dataset, which is missing many intensities.
+We run the DreamAI imputation (using the default parameters intended for log transformed
+proteomics data) a total of 10 times, and compare the 10 resulting datasets using
+PCA plots and correlation. In order to use these tools, a dataset with no more than
+90% of data missing (row wise and column wise) is needed, so we filter accordingly
+first.
+
+As a quick summary of the distribution of NA values among the proteins, we show
+a histogram of the number of NA values per protein.
+
+
+```{r missing data}
+missing <- rowSums(is.na(prot.mat))
+dff = data.frame(missing = missing)
+
+breaks = seq(-0.25, ncol(prot.mat) + 0.25, 0.5)
+
+p1 <- ggplot(dff, aes(x = missing)) + geom_histogram(breaks = breaks) +
+  ylab("") + xlab("Number missing") +
+  ggtitle("Number missing per protein") +
+  theme(plot.title = element_text(hjust = 0.5))
+p1
+
+```
+
+
+# Stability of DreamAI imputation
+
+
+
+```{r setting up, include=FALSE}
+library("cluster")
+library("survival")
+library("randomForest")
+library("missForest")
+library("glmnet")
+library("Rcpp")
+library("foreach")
+library("itertools")
+library("iterators")
+library("Matrix")
+library("impute")
+library("DreamAI")
+
+data <- prot.mat
+
+# remove rows where all data is NA
+data = data[rowSums(is.na(data)) != ncol(data), ]
+
+# Any features with more than 90% missing data are thrown out. Needed for using
+# DreamAI!! using a slightly stricter filter in order to obtain under 90% missing
+# in the columns as well!!
+N <- ncol(data)
+keeping <- rowSums(is.na(data)) < 0.9*N 
+data <- data[keeping, ]
+
+## Even with the filtering above, we still have a few columns with 93% or so missing data
+## So we have to drop a few more rows, strategically.
+dropped <- 25
+i = 0
+
+while(any(colSums(is.na(data)) >= 0.9*nrow(data))){
+  
+  ## We weight each intensity from a particular sample according to how much data
+  ## that sample is missing. Then we aggregate these into a feature score.
+  ## For a given feature, the higher the score, the more intensities from highly 
+  ## missing sample are present in that feature.
+  weights <- colSums(is.na(data))/(0.9*nrow(data))
+  weights <- matrix(weights, nrow = nrow(data), ncol = 30, byrow = TRUE)
+  
+  score <- as.numeric(!is.na(data))*weights
+  rownames(score) <- rownames(data)
+  importance <- rowSums(score) %>%
+    sort(decreasing = F) %>%
+    names()
+  
+  keeping <- importance[dropped:length(importance)]
+  data <- data[keeping, ]
+}
+
+results <- list()
+
+for (i in 1:10){
+    impute <- DreamAI(data,k=10,maxiter_MF = 10, ntree = 100,maxnodes = NULL,maxiter_ADMIN=30,
+                      tol=10^(-2),gamma_ADMIN=0,gamma=50,
+                      CV=FALSE,fillmethod="row_mean",maxiter_RegImpute=10,
+                      conv_nrmse = 1e-6,iter_SpectroFM=40, out="Ensemble",
+                      method = c("KNN", "ADMIN", "MissForest", "Brinn", 
+                                 "SpectroFM", "RegImpute"))
+
+  
+  results[[i]] <- impute$Ensemble
+}
+
+complete.total <- sum(rowSums(is.na(prot.mat)) == 0)
+
+```
+
+
+Beginning with `r nrow(prot.mat)` proteins, a total of `r nrow(data)` remain after
+filtering. A few samples have particularly few intensities, and as a result we have
+to drop quite a few proteins to fall below the 90% hard ceiling on missing data required by DreamAI.
+
+Note, we do use MissForest in the consensus building when imputing the dataset.
+
+
+```{r Plots, include=FALSE}
+plots.pca <- list()
+
+p.og <- plot_pca_v4(m, "Trametinib", show.ellipse = F) + ggtitle("Origina data") + 
+  theme(plot.title = element_text(hjust = 0.5, size = 12))
+
+for (i in 1:10){
+  m.1 <- MSnSet(exprs = results[[i]], pData = meta)
+  p <- plot_pca_v4(m.1, "Trametinib", show.ellipse = F) + ggtitle(paste("Imputed data, run", i)) + 
+    theme(plot.title = element_text(hjust = 0.5, size = 11)) + guides(color = FALSE)
+  
+  plots.pca[[i]] <- p
+}
+
+```
+
+
+Below we first see the PCA plots made using the original data, and below that the PCA plots
+of the 10 imputed datasets. Note that the original dataset was made using only the
+`r complete.total` proteins which have all intensities present, while the other PCA plots have the
+benefit of using all `r nrow(data)` proteins, as the NA values have been imputed.
+
+
+```{r show plots}
+p.og
+
+grid.arrange(grobs = plots.pca[1:2], ncol = 2, nrow = 1)
+grid.arrange(grobs = plots.pca[3:4], ncol = 2, nrow = 1)
+grid.arrange(grobs = plots.pca[5:6], ncol = 2, nrow = 1)
+grid.arrange(grobs = plots.pca[7:8], ncol = 2, nrow = 1)
+grid.arrange(grobs = plots.pca[9:10], ncol = 2, nrow = 1)
+
+```
+
+
+```{r}
+
+pairs <- combn(1:10, 2, paste, collapse = '-')
+dff <- data.frame(Protein = rownames(data))
+dff.corr <- data.frame(Protein = rownames(data))
+
+for (pair in pairs){
+  i <- as.numeric(sub(".*-", "", pair))
+  j <- as.numeric(sub("-.*", "", pair))
+  
+  xx <- results[[i]] - results[[j]]
+  diff <- apply(xx, 1, norm, type = "2")
+  dff[pair] <- diff
+  
+  corre <- sapply(rownames(xx), function(name){
+    yy <- results[[i]]
+    zz <- results[[j]]
+    cor(yy[name,], zz[name,])
+  })
+  
+  dff.corr[pair] <- corre
+}
+
+max.difference <- apply(dff[, -1], 1, max)
+dff$max <- max.difference
+min.correlation <- apply(dff.corr[, -1], 1, min)
+dff.corr$min <- min.correlation
+
+
+```
+
+
+We compute the protein-wise correlation between the 10 datasets (45 pairs), and take the
+minimum correlation for each protein. Note that a correlation close 1 (say 0.995) implies 
+a close linear relationship. The result we  below implies that the proteins between the datasets
+are highly correlated, and thus there will be a high degree of consistency in the 
+results of differential expression, a good sign for the imputation.
+
+
+```{r histogram}
+
+p1 <- ggplot(dff.corr, aes(x = min)) + geom_histogram(breaks = seq(0.995,1,0.0001)) +
+  ylab("Count") + xlab("Correlation") +
+  ggtitle("Minimum correlation among 10 imputed datasets") +
+  theme(plot.title = element_text(hjust = 0.5))
+p1
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
