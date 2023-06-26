@@ -17,11 +17,13 @@ library(dplyr)
 # load data
 globalData <- querySynapseTable('syn22986326') %>%
   subset(!is.nan(LogRatio)) %>%
+  subset(Gene!='')|>
   mutate(Gene = unlist(Gene))
 
-phosData <- querySynapseTable('syn22986341') %>%
+phosData <- readr::read_csv(sync$get('syn51753813')$path)|> 
   subset(!is.nan(LogRatio)) %>%
   mutate(Gene = unlist(Gene)) %>%
+  subset(site!='')|>
   mutate(site = unlist(site))
 
 
