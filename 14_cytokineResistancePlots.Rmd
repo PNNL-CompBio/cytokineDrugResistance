@@ -17,11 +17,13 @@ library(dplyr)
 # load data
 globalData <- querySynapseTable('syn22986326') %>%
   subset(!is.nan(LogRatio)) %>%
+  subset(Gene!='')|>
   mutate(Gene = unlist(Gene))
 
-phosData <- querySynapseTable('syn22986341') %>%
+phosData <- readr::read_csv(sync$get('syn51753813')$path)|> 
   subset(!is.nan(LogRatio)) %>%
   mutate(Gene = unlist(Gene)) %>%
+  subset(site!='')|>
   mutate(site = unlist(site))
 
 
@@ -107,7 +109,7 @@ phosData %>% filter(Batch == "Experiment 2",
 globalData %>% filter(Batch == "Experiment 1",
                     CellType == "MOLM-13") %>%
   plotAllData(colour='Treatment', fill='Treatment') +
-  ggtitle("Global PCA, MOLM-13")
+  ggtitle("Global PCA, Experimen 1")
 #dev.off()
 
 
@@ -115,7 +117,7 @@ globalData %>% filter(Batch == "Experiment 1",
 phosData %>% filter(Batch == "Experiment 1",
                     CellType == "MOLM-13") %>%
   plotAllData(colour='Treatment', fill='Treatment') +
-  ggtitle("Phospho PCA, MOLM-13")
+  ggtitle("Phospho PCA,Experiment 1")
 #dev.off()
 
 ```
@@ -193,7 +195,7 @@ compare_samples <- function(phospho_data, treatment_A, treatment_B) {
 # KSEA + heatmaps
 
 ## Experiment 2
-```{r}
+```{r exp2ksea, message=FALSE}
 # experiment 2
 x <- phosData %>%
   filter(Batch == "Experiment 2")
@@ -213,7 +215,7 @@ if (!dir.exists(output_dir)) dir.create(output_dir)
 setwd(output_dir)
 KSEA_plots_output <- doAllKSEAplots(limma_DEA_results, x, output_dir = "./ksea_plots")
 #output results
-write.table(KSEA_plots_output, file='lateOnly_KSEA.tsv',
+write.table(KSEA_plots_output, file='exp2_KSEA.tsv',
             quote=FALSE, sep='\t', col.names = NA)
 ```
 
@@ -247,7 +249,7 @@ write.table(KSEA_plots_output, file='lateOnly_KSEA.tsv',
 
 
 
-```{r}
+```{r code for analysis}
 
 
 ##plot kinase activity
@@ -314,14 +316,14 @@ sig.kin <- KSEA_plots_output %>%
   
 print(sig.kin)
   
-plotKinDat(x, kindat, sig.kin, file.path(output_dir,'lateOnly'))
+plotKinDat(x, kindat, sig.kin, file.path(output_dir,'experiment2'))
 ```
 
 ## Experiment 1, Molm13
 ```{r}
 
 
-# experiment 2
+# experiment 1
 x <- phosData %>%
   filter(Batch == "Experiment 1",
          CellType == "MOLM-13")
@@ -369,7 +371,7 @@ plotKinDat(x, kindat, sig.kin, file.path(output_dir,'lateOnly'))
 ```{r}
 
 
-# experiment 2
+# experiment 1
 x <- phosData %>%
   filter(Batch == "Experiment 1",
          CellType == "MOLM-13 Tr Resistant")
@@ -395,6 +397,7 @@ write.table(KSEA_plots_output, file='Molm13_TrResistant_KSEA.tsv',
 
 ## Phospho data kinase enrichment
 
+We take all the significantly enriched kinases across the data points and plot the substrate activity in the following heatmap.
 ```{r }
 
 
@@ -409,5 +412,15 @@ sig.kin <- KSEA_plots_output %>%
   
 print(sig.kin)
   
-plotKinDat(x, kindat, sig.kin, file.path(output_dir,'lateOnly'))
+plotKinDat(x, kindat, sig.kin, file.path(output_dir,'tramResist'))
 ```
+
+
+## Selected Kinase expression and activity
+
+```{r}
+
+kins=c('CDK1', 'CDK2', 'CDK4', 'CDK6', 'MAPK1', 'MAPK3', 'MAPK9', 'SRC', 'MTOR', 'JAK2', 'JAK3')
+
+```
+
