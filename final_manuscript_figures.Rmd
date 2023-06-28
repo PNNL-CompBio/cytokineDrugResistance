@@ -193,7 +193,7 @@ x <- phosData %>%
 limma_DEA_results <- list(Tram_vs_Parental = compare_samples(x,"none","Trametinib"),
                 TramMCP1_vs_Parental = compare_samples(x,"none","Trametinib+MCP-1"),
                 Tram_vs_TrMCP1 = compare_samples(x,"Trametinib+MCP-1","Trametinib"),
-                TrMCP1_vs_Parental = compare_samples(x,"none","Trametinib+MCP-1"))
+               MCP1_vs_Parental = compare_samples(x,"none","MCP-1"))
 KSEA_plots_output <- doAllKSEAplots(limma_DEA_results, x, output_dir = ".", p_cutoff=0.1)
 #output results
 write.table(KSEA_plots_output, file='exp1_KSEA.tsv',
