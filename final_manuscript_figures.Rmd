@@ -1,0 +1,253 @@
+---
+title: "Final Manuscript Figures"
+author: "Sara Gosline"
+date: "2023-06-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(amlresistancenetworks)
+library(dplyr)
+```
+
+## Description of work
+
+This script only plots the data that was used in the manuscript, thus reducing the confusion of other documents. 
+
+## Load data
+Here we load the data from files located on Synapse at http://synapse.org/ptrc 
+
+It is primarily two files.
+```{r load data}
+sync<-synapseLogin()
+phosData<-readr::read_csv(sync$get('syn51753813')$path)|>#querySynapseTable('syn22986341')%>%subset(!is.nan(LogRatio
+  subset(site!='')|>
+ # mutate(Gene=unlist(Gene))%>%
+#  mutate(site=unlist(site))%>%
+  subset(TimePoint!=120)
+
+globalData<-readr::read_csv(sync$get('syn51753816')$path)|>#querySynapseTable('syn22986326')%>%
+  subset(!is.nan(LogRatio))%>%
+  subset(Gene!='')|>
+  #mutate(Gene=unlist(Gene))%>%
+  subset(TimePoint!=120)
+
+summary <- phosData %>%
+  dplyr::select(sample, CellType, TimePoint, Treatment,Batch) %>%
+  distinct() %>%
+  mutate(conditionName = stringr::str_c(CellType, TimePoint, Treatment,
+                                        sep = '_'))
+
+print(summary)
+```
+Now that we have the data we can analyze it. 
+
+## Data is from two distinct experiments
+
+Below are the summaries of data from each experiment
+
+### Experiment 1, Molm-13
+```{r}
+#' @param dat.table
+plotAllData <- function(dat.table, expand=0.01, alpha=0.1, ...) {
+  library(ggfortify)
+  met <- dat.table %>%
+    dplyr::select(sample, CellType, TimePoint, Treatment) %>%
+    distinct()
+    
+  mat <- dat.table %>% dplyr::select(Gene,LogRatio,sample) %>%
+    distinct() %>%
+    mutate(LogRatio=as.numeric(LogRatio)) %>%
+    tidyr::pivot_wider(names_from='sample', values_from='LogRatio',
+                       values_fn=list(LogRatio=function(x) mean(x,na.rm=T)),
+                       values_fill=list(LogRatio=0)) %>%
+    tibble::remove_rownames() %>%
+    tibble::column_to_rownames('Gene')
+  mat <- mat[complete.cases(mat),]
+  x <- prcomp(t(mat))$x
+  x <- as.data.frame(x)
+  x$sample <- rownames(x)
+  ggdata <- inner_join(x, met, by="sample")
+  
+  library(ggforce)
+  ggplot(ggdata, aes_string(x="PC1", y="PC2", ...)) +
+    geom_point(size=2.5) +
+    ggforce::geom_mark_ellipse(color = NA, alpha=alpha, expand=expand)
+ 
+}
+
+#pdf(file.path(output_dir, "Late_MOLM13_w_Parental_phospho_PCA.pdf"))
+globalData %>% filter(Batch == "Experiment 1",
+                    CellType == "MOLM-13") %>%
+    dplyr::mutate(TimePoint=as.factor(TimePoint))|>
+  plotAllData(colour='Treatment', fill='Treatment',shape='TimePoint') +
+  ggtitle("Global PCA, Experiment 1")
+#dev.off()
+
+
+#pdf(file.path(output_dir, "Late_MOLM13_w_Parental_phospho_PCA.pdf"))
+phosData %>% filter(Batch == "Experiment 1",
+                    CellType == "MOLM-13") %>%
+  dplyr::mutate(TimePoint=as.factor(TimePoint))|>
+  plotAllData(colour='Treatment', fill='Treatment',shape='TimePoint') +
+  ggtitle("Phospho PCA,Experiment 1")
+#dev.off()
+
+```
+
+### Experiment 2
+Here we have late resistance compared to early resistance.
+```{r}
+
+x <- globalData %>% filter(Batch == "Experiment 2",
+                      TimePoint != 120)
+x %>% plotAllData(color='Treatment', fill='Treatment',shape='CellType') +
+  ggtitle("Global PCA, Late MOLM-13 + Parental")
+
+phosData %>% filter(Batch == "Experiment 2",
+                    TimePoint != 120) %>%
+  plotAllData(colour='Treatment', fill='Treatment', shape='CellType') +
+  ggtitle("Phospho PCA, Late MOLM-13 + Parental")
+
+```
+
+## Figures
+
+We have multiple panels for each figure.
+
+### Figure 3B
+
+For figure 3B we focus on experiment 1 and analyze the phosphoproteomic changes at three points. 
+
+```{r plotting, echo=F, warning=F, message=F}
+
+#' plot all the KSEA 
+#' @param condList
+#' @return data frame
+#' @importsFrom dplyr %>% distinct mutate left_join select 
+#' @importsFrom stringr str_replace str_replace_all
+#' @importsFrom purrr map_df
+#' @importsFrom tibble rownames_to_column
+#' @importsFrom amlresistancenetworks computeKSEA
+
+library(stringr)
+library(dplyr)
+library(tibble)
+library(purrr)
+
+doAllKSEAplots <- function(condList, pdat, output_dir, p_cutoff=0.05) {
+  gene.to.site<-dplyr::select(pdat,Gene,site,Peptide)%>%distinct()%>%
+    dplyr::mutate(residue=stringr::str_replace(site,paste0(Gene,'-'),''))%>%
+    dplyr::mutate(residue=stringr::str_replace_all(residue,"([STY])", ";\\1"))%>%
+    dplyr::mutate(residue=stringr::str_replace(residue,"^;", ""))%>%
+    dplyr::mutate(residue=stringr::str_replace_all(residue,"([sty])", ""))
+  
+  full.df <- purrr::map_df(names(condList), .f = function(clName) { 
+    condList[[clName]] %>%
+      rownames_to_column('site') %>%
+      left_join(gene.to.site) %>%
+      select(Gene, Peptide, residue, value='logFC', p_adj='adj.P.Val') %>%
+      amlresistancenetworks::computeKSEA(., prefix = clName, p_cutoff) %>%
+      mutate(Condition = clName) %>%
+      as.data.frame()
+  })
+  
+  return(full.df)
+}
+
+compare_samples <- function(phospho_data, treatment_A, treatment_B) {
+  A_samples <- phospho_data %>%
+    filter(Treatment == treatment_A) %>% 
+    distinct(sample) %>%
+    pull(sample)
+  B_samples <- phospho_data %>%
+    filter(Treatment == treatment_B) %>% 
+    distinct(sample) %>%
+    pull(sample)
+  phosMat <- phospho_data_to_matrix(phospho_data)
+  limmaTwoFactorDEAnalysis(phosMat, A_samples, B_samples)
+}
+
+
+fmean<-function(x){
+  mean(x,na.rm=T)
+}
+phospho_data_to_matrix <- function(phospho_data){
+  phospho_data %>%
+    dplyr::select(sample, site, LogRatio) %>%
+    tidyr::pivot_wider(values_from = LogRatio, names_from = sample,
+                       values_fn = list(LogRatio = fmean)) %>%
+    tibble::remove_rownames() %>%
+    tibble::column_to_rownames('site')
+}
+phosMat <- phospho_data_to_matrix(phosData)
+```
+
+
+```{r fig3b,message=F, echo=T}
+x <- phosData %>%
+  filter(Batch == "Experiment 1")|>
+  subset(TimePoint!=5)
+
+limma_DEA_results <- list(Tram_vs_Parental = compare_samples(x,"none","Trametinib"),
+                TramMCP1_vs_Parental = compare_samples(x,"none","Trametinib+MCP-1"),
+                Tram_vs_TrMCP1 = compare_samples(x,"Trametinib+MCP-1","Trametinib"),
+                TrMCP1_vs_Parental = compare_samples(x,"none","Trametinib+MCP-1"))
+KSEA_plots_output <- doAllKSEAplots(limma_DEA_results, x, output_dir = ".", p_cutoff=0.1)
+#output results
+write.table(KSEA_plots_output, file='exp1_KSEA.tsv',
+            quote=FALSE, sep='\t', col.names = NA)
+```
+Three of the four of these figures are in the paper.
+
+### Supplemental Figure 3A
+For this figure we focus on the proteomic analysis and compare sensitive versus enrichment samples. This requires only experiment 2.
+
+```{r resistance vs sens, echo=T}
+
+#' plot all the GO 
+#' @param condList
+#' @return data frame
+doAllGOplots<-function(condList){
+  
+  full.df<-purrr::map_df(names(condList),.f=function(clName){ 
+    condList[[clName]]%>%
+      tibble::rownames_to_column('Gene')%>%
+      dplyr::select(Gene,value='logFC')%>%
+      amlresistancenetworks::plotOldGSEA(.,prefix=clName,0.1,width=16)%>%
+      as.data.frame()
+  })
+  
+}
+protSumm <-subset(summary,Batch=='Experiment 2')
+
+
+protMat<-globalData%>%
+  # subset(Batch=='Experiment 1')%>%
+    subset(TimePoint==0)%>%
+  dplyr::select(sample,Gene,LogRatio)%>%
+  distinct()|>
+  tidyr::pivot_wider(values_from=LogRatio,names_from=sample,
+                     values_fn=list(LogRatio=fmean))%>%
+  as.data.frame()|>
+  subset(Gene!='')|>
+  tibble::remove_rownames()|>
+  tibble::column_to_rownames('Gene')
+
+m13Prot<-list(Tram_vs_control=limmaTwoFactorDEAnalysis(protMat,
+                         filter(protSumm,conditionName=='MOLM-13_0_none')$sample,    
+                        filter(protSumm,conditionName=='Late MOLM-13_0_Trametinib')$sample),
+            TramMCP1_vs_control=limmaTwoFactorDEAnalysis(protMat,
+                         filter(protSumm,conditionName=='MOLM-13_0_none')$sample,
+                        filter(protSumm,conditionName=='Late MOLM-13_0_Trametinib+MCP-1')$sample),
+              TramMCP1_vs_Tram=limmaTwoFactorDEAnalysis(protMat,
+                         filter(protSumm,conditionName=='Late MOLM-13_0_Trametinib')$sample,      
+                         filter(protSumm,conditionName=='Late MOLM-13_0_Trametinib+MCP-1')$sample))
+ 
+  p3<-doAllGOplots(m13Prot)
+
+```
+
+The last figure to generate is the heatmap.?
+
