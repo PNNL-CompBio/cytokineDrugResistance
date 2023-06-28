@@ -360,8 +360,8 @@ m13Phos<-list(Tram_vs_control=limmaTwoFactorDEAnalysis(phosMat,
     select(Kinase.Gene,Condition)%>%distinct()
  # print(sig.kin)
   
-  res=plotKinDat(subset(kindat,Sample%in%summary$sample), sig.kin$Kinase.Gene,'exp2Results')
-  res  
+ # res=plotKinDat(subset(kindat,Sample%in%summary$sample), sig.kin$Kinase.Gene,'exp2Results')
+#  res  
 ```
 ### Plot kinases of interest
 

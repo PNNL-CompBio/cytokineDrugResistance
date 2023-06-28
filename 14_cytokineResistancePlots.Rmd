@@ -15,16 +15,28 @@ library(dplyr)
 
 ```{r, cache=T}
 # load data
-globalData <- querySynapseTable('syn22986326') %>%
-  subset(!is.nan(LogRatio)) %>%
-  subset(Gene!='')|>
-  mutate(Gene = unlist(Gene))
 
-phosData <- readr::read_csv(sync$get('syn51753813')$path)|> 
-  subset(!is.nan(LogRatio)) %>%
-  mutate(Gene = unlist(Gene)) %>%
+phosData<-readr::read_csv(sync$get('syn51753813')$path)|>#querySynapseTable('syn22986341')%>%subset(!is.nan(LogRatio
   subset(site!='')|>
-  mutate(site = unlist(site))
+ # mutate(Gene=unlist(Gene))%>%
+#  mutate(site=unlist(site))%>%
+  subset(TimePoint!=120)
+
+globalData<-readr::read_csv(sync$get('syn51753816')$path)|>#querySynapseTable('syn22986326')%>%
+  subset(!is.nan(LogRatio))%>%
+  subset(Gene!='')|>
+  #mutate(Gene=unlist(Gene))%>%
+  subset(TimePoint!=120)
+# globalData <- querySynapseTable('syn22986326') %>%
+#   subset(!is.nan(LogRatio)) %>%
+#   subset(Gene!='')|>
+#   mutate(Gene = unlist(Gene))
+
+# phosData <- readr::read_csv(sync$get('syn51753813')$path)|> 
+#   subset(!is.nan(LogRatio)) %>%
+#   mutate(Gene = unlist(Gene)) %>%
+#   subset(site!='')|>
+#   mutate(site = unlist(site))
 
 
 summary <- phosData %>%
@@ -38,11 +50,15 @@ print(summary)
 ```
 
 ```{r}
+
+fmean<-function(x){
+  mean(x,na.rm=T)
+}
 phospho_data_to_matrix <- function(phospho_data){
   phospho_data %>%
     dplyr::select(sample, site, LogRatio) %>%
     tidyr::pivot_wider(values_from = LogRatio, names_from = sample,
-                       values_fn = list(LogRatio = mean, na.rm=T)) %>%
+                       values_fn = list(LogRatio = fmean)) %>%
     tibble::remove_rownames() %>%
     tibble::column_to_rownames('site')
 }
@@ -213,10 +229,10 @@ output_dir <- "./ksea_results"
 if (!dir.exists(output_dir)) dir.create(output_dir)
 
 setwd(output_dir)
-KSEA_plots_output <- doAllKSEAplots(limma_DEA_results, x, output_dir = "./ksea_plots")
+#KSEA_plots_output <- doAllKSEAplots(limma_DEA_results, x, output_dir = "./ksea_plots")
 #output results
-write.table(KSEA_plots_output, file='exp2_KSEA.tsv',
-            quote=FALSE, sep='\t', col.names = NA)
+#write.table(KSEA_plots_output, file='exp2_KSEA.tsv',
+        #    quote=FALSE, sep='\t', col.names = NA)
 ```
 
 ## With lower p-value cutoff
@@ -225,24 +241,26 @@ write.table(KSEA_plots_output, file='exp2_KSEA.tsv',
 ```{r, fig.height=12}
 # experiment 2
 x <- phosData %>%
-  filter(Batch == "Experiment 2")
+  filter(Batch == "Experiment 1")
 
 
-limma_DEA_results <- list(Tram_vs_Parental = compare_samples(x,
-                                                   "Trametinib",       "none"),
-                TramMCP1_vs_Parental = compare_samples(x,
-                                                   "Trametinib+MCP-1", "none"),
-                Tram_vs_TrMCP1 = compare_samples(x,
-                                                   "Trametinib",       "Trametinib+MCP-1"))
+limma_DEA_results <- list(Tram_vs_Parental = compare_samples(x,"none",
+                                                   "Trametinib"),
+                TramMCP1_vs_Parental = compare_samples(x,"none",
+                                                   "Trametinib+MCP-1")
+                Tram_vs_TrMCP1 = compare_samples(x,"Trametinib+MCP-1",
+                                                   "Trametinib"),
+                TrMCP1_vs_Parental = compare_samples(x,"none",
+                                                   "Trametinib+MCP-1"))
 
 
-output_dir <- "./ksea_results"
-if (!dir.exists(output_dir)) dir.create(output_dir)
+#output_dir <- "./ksea_results"
+#if (!dir.exists(output_dir)) dir.create(output_dir)
 
-setwd(output_dir)
-KSEA_plots_output <- doAllKSEAplots(limma_DEA_results, x, output_dir = "./ksea_plots", p_cutoff=1)
+#setwd(output_dir)
+KSEA_plots_output <- doAllKSEAplots(limma_DEA_results, x, output_dir = ".", p_cutoff=0.1)
 #output results
-write.table(KSEA_plots_output, file='lateOnly_KSEA.tsv',
+write.table(KSEA_plots_output, file='exp1_KSEA.tsv',
             quote=FALSE, sep='\t', col.names = NA)
 ```
 
