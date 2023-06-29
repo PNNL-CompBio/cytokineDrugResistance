@@ -246,7 +246,8 @@ m13Prot<-list(Tram_vs_control=limmaTwoFactorDEAnalysis(protMat,
                          filter(protSumm,conditionName=='Late MOLM-13_0_Trametinib+MCP-1')$sample))
  
   p3<-doAllGOplots(m13Prot)
-
+write.table(p3, file='exp2_GSEA.tsv',
+            quote=FALSE, sep='\t', col.names = NA)
 ```
 
 The last figure to generate is the heatmap.?
