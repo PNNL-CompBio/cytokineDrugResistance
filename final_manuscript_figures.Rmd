@@ -148,7 +148,7 @@ doAllKSEAplots <- function(condList, pdat, output_dir, p_cutoff=0.05) {
       rownames_to_column('site') %>%
       left_join(gene.to.site) %>%
       select(Gene, Peptide, residue, value='logFC', p_adj='adj.P.Val') %>%
-      amlresistancenetworks::computeKSEA(., prefix = clName, p_cutoff) %>%
+      amlresistancenetworks::computeKSEA(., prefix = clName, p_cutoff, suffix='pdf') %>%
       mutate(Condition = clName) %>%
       as.data.frame()
   })
